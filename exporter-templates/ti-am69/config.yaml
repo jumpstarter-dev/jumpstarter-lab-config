@@ -13,9 +13,12 @@ spec:
       ram: "32"
       cpu: "8"
       location: "{{ location.name }}"
-  configTemplate:
-    namespace: "{{ namespace }}"
-    name: "{{ name }}"
+  configTemplate: # this is the config file installed in /etc/jumpstarter/exporters/{{ name }}.yaml
+    apiVersion: jumpstarter.dev/v1alpha1
+    kind: ExporterConfigTemplate
+    metadata:
+      namespace: "{{ namespace }}"
+      name: "{{ name }}"
     endpoint: "{{ endpoint }}"
     tls:
       ca: {{ tls_ca }}
