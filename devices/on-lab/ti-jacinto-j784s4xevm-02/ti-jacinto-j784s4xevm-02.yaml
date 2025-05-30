@@ -1,0 +1,30 @@
+
+apiVersion: meta.jumpstarter.dev/v1alpha1
+kind: Exporter
+metadata:
+  name: ti-jacinto-j784s4xevm-01
+spec:
+  locationRef:
+    name: bos2-lab1
+    rack: "311"
+    tray: U5
+  exporterHostRef:
+    name: ti-jacinto-j784s4xevm-01-sidekick-02
+  jumpstarterControllerRef:
+    name: "jump1-mpp"
+  configTemplateRef:
+    name: ti-j784s4xevm-exporter-template
+    parameters:
+      device_address: "{{ name }}.auto.bos2.dc.example.com"
+      pdu_host: "some-pdu-hostname.auto.eng.bos2.bc.somedomain.com"
+      pdu_user: "{{ SECRETS.pdu_st_pro3_l1_311a_user }}"
+      pdu_password: "{{ SECRETS.pdu_st_pro3_l1_311a_password }}"
+      pdu_oid: "1.3.6.1.4.1.13742.6.4.1.2.1.2.1"
+      pdu_plug: 35
+      device_console: "/dev/ttyUSB0"
+  labels:
+    some: "label"
+  notes: |
+    This is a J784S4x EVM device used for testing and development.
+    It is located in the BOS2 data center, Lab1, Rack 311, Tray U3.
+    The device is connected to a sidekick exporter host for management.

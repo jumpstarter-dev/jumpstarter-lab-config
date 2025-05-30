@@ -1,0 +1,58 @@
+apiVersion: meta.jumpstarter.dev/v1alpha1
+kind: ExporterConfigTemplate
+metadata:
+  name: ti-am69
+spec:
+  containerImage: quay.io/jumpstarter/jumpstarter:release-0.6
+  exporterMetadata:
+    name: "{{ name }}"
+    labels:
+      device: "{{ name }}"
+      board: ti-am69
+      fleet: ti-am69-production
+      ram: "32"
+      cpu: "8"
+      location: "{{ location.name }}"
+  configTemplate:
+    namespace: "{{ namespace }}"
+    name: "{{ name }}"
+    endpoint: "{{ endpoint }}"
+    tls:
+      ca: {{ tls_ca }}
+      insecure: true
+    token: "{{ token }}"
+    grpcConfig:
+      grpc.insecure: true
+      grpc.keepalive_time_ms: 20000
+    export:
+      storage:
+        type: "jumpstarter_driver_flashers.driver.TIAM69Flasher"
+        config:
+          log_level: "DEBUG"
+        children:
+          serial:
+            ref: "serial"
+          power:
+            ref: "power"
+      serial:
+        type: "jumpstarter_driver_pyserial.driver.PySerial"
+        config:
+          log_level: "DEBUG"
+          url: "{{ device_console }}"
+          #url: "socket://localhost:9997"
+          baudrate: 115200
+      power:
+        type: "jumpstarter_driver_snmp.driver.SNMPServer"
+        config:
+          timeout: 5
+          log_level: "DEBUG"
+          host: "{{ pdu_host }}"
+          user: "{{ pdu_user }}"
+          password: "{{ pdu_password }}"
+          plug: "{{ pdu_plug }}"
+          oid: " {{ pdu_oid }}"
+      ssh:
+        type: "jumpstarter_driver_network.driver.TcpNetwork"
+        config:
+          host: "{{ device_address }}"
+          port: 22

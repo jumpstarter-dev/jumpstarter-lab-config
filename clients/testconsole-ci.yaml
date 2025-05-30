@@ -1,0 +1,8 @@
+apiVersion: jumpstarter.dev/v1alpha1
+kind: Client
+metadata:
+  name: test-console-ci
+  labels:
+    user-type: "ci"
+spec:
+  username: rh:majopela

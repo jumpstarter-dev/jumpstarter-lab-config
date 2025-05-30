@@ -1,0 +1,13 @@
+FROM quay.io/fedora/fedora-bootc:41
+
+# Add your root's ssh key
+RUN mkdir -p /usr/etc-system/ && \
+    echo 'AuthorizedKeysFile /usr/etc-system/%u.keys' >> /etc/ssh/sshd_config.d/30-auth-system.conf && \
+    echo 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGvQsqvS6o8AC0AnTRQwh7TYXoHKGqlgH24OxFoqZy+G fedora@jumpstarter-dev' > /usr/etc-system/root.keys && chmod 0600 /usr/etc-system/root.keys
+
+ADD wheel-passwordless-sudo /etc/sudoers.d/wheel-passwordless-sudo
+
+# preload images
+#RUN podman pull quay.io/jumpstarter-dev/jumpstarter:latest
+
+RUN dnf install -y lm_sensors libgpiod-utils  && dnf clean all

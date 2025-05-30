@@ -1,0 +1,13 @@
+
+apiVersion: meta.jumpstarter.dev/v1alpha1
+kind: PhysicalLocation
+metadata:
+  name: brno-minilab1
+spec:
+  description: "A minilab in Brno, Czech Republic"
+  address: "Somewhere in Brno, Czech Republic"
+  contacts:
+    - name: "Michal S."
+      email: "michal@s.com"
+      phone: "+13424343422"
+

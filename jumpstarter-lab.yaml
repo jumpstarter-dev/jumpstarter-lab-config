@@ -1,0 +1,12 @@
+
+# This is a basic configuration for the jumpstarter-lab-config tool
+# It defines the sources for locations, clients, exporter hosts, exporters,
+# exporter templates, and jumpstarter controllers.
+
+sources:
+  locations: locations/*.yaml
+  clients: clients/*.yaml
+  exporter_hosts: devices/**/*-sidekick.yaml
+  exporters: devices/**/*.yaml
+  exporter_templates: exporter-templates/*.yaml
+  jumpstarter_controllers: jumpstarter-controllers/*.yaml

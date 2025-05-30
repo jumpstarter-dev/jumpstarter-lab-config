@@ -1,0 +1,13 @@
+
+apiVersion: meta.jumpstarter.dev/v1alpha1
+kind: PhysicalLocation
+metadata:
+  name: bos2-lab1
+spec:
+  description: "Boston Data Center, Lab1"
+  address: "1234 Example St, Boston, MA 02110"
+  contacts:
+    - name: "John Doe"
+      email: "john@doe.com"
+      phone: "+1234567890"
+

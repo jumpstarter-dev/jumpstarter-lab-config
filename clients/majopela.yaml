@@ -1,0 +1,8 @@
+apiVersion: jumpstarter.dev/v1alpha1
+kind: Client
+metadata:
+  name: majopela
+  labels:
+    user-type: "developer"
+spec:
+  username: rh:majopela

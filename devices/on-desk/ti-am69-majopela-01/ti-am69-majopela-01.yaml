@@ -1,0 +1,15 @@
+
+apiVersion: meta.jumpstarter.dev/v1alpha1
+kind: Exporter
+metadata:
+  name: ti-am69-majopela-01
+spec:
+  # this is a desk-user device, we do not track location, and we don't manage the host
+  # we let authentication with the OIDC provider
+  username: rh:majopela
+  labels: # adds or overrides the template labels which will be applied to the exporter
+    device: "{{ name }}"
+    board: ti-am69
+    ram: "32"
+    cpu: "8"
+    location: "majopela-desk"

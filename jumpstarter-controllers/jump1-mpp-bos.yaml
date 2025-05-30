@@ -1,0 +1,13 @@
+apiVersion: meta.jumpstarter.dev/v1alpha1
+kind: JumpstarterController
+metadata:
+  name: jump1-mpp-bos
+spec:
+  kube-context: "mpp-bos" # The kubeconfig context to talk with this jumpstarter controller
+  endpoints:
+    - "grpc.jump1-mpp-stg.some.endpoint.com"
+    - "grpc.jump1-mpp-stg.internal.endpoint.com"
+  namespace: "jumpstarter-stagging"
+  notes: |
+    This controller is deployed on the MPP cluster close to boston.
+    It's a staging deployment.

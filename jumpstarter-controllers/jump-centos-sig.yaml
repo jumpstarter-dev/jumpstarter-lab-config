@@ -1,0 +1,9 @@
+apiVersion: meta.jumpstarter.dev/v1alpha1
+kind: JumpstarterController
+metadata:
+  name: jump-centos
+spec:
+  kube-context: "centos-sig" # The kubeconfig context to talk with this jumpstarter controller
+  endpoints:
+    - "grpc.jump1.some.centos-sig.com"
+  namespace: "jumpstarter-lab"
