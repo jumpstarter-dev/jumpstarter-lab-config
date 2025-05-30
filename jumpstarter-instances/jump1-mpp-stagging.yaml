@@ -1,5 +1,5 @@
 apiVersion: meta.jumpstarter.dev/v1alpha1
-kind: JumpstarterController
+kind: JumpstarterInstance
 metadata:
   name: jump1-mpp-stagging-bos
 spec:
