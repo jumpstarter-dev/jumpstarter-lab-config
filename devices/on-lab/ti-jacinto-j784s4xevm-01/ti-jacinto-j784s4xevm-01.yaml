@@ -1,9 +1,10 @@
 
 apiVersion: meta.jumpstarter.dev/v1alpha1
-kind: Exporter
+kind: ExporterInstance
 metadata:
   name: ti-jacinto-j784s4xevm-01
 spec:
+  type: container
   locationRef:
     name: bos2-lab1
     rack: "311"

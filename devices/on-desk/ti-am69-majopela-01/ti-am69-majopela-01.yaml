@@ -1,6 +1,6 @@
 
 apiVersion: meta.jumpstarter.dev/v1alpha1
-kind: Exporter
+kind: ExporterInstance
 metadata:
   name: ti-am69-majopela-01
 spec:
