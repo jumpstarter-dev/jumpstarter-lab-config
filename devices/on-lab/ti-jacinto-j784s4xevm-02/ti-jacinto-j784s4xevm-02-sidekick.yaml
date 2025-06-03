@@ -8,7 +8,7 @@ spec:
     name: bos2-lab1
     rack: "311"
     tray: U4
-  containerImage: "quay.io/auto-lab/jumpstarter-exporter-bootc:0.6.1"
+  containerImage: "$( vars.ti-exporter-image )"
   addresses:
     - ti-jacinto-j784s4xevm-sidekick-02.auto.bos2.dc.example.com
   power:

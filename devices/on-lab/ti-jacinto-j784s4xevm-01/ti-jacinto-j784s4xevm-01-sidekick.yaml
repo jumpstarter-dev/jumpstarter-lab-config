@@ -3,12 +3,14 @@ apiVersion: meta.jumpstarter.dev/v1alpha1
 kind: ExporterHost
 metadata:
   name: ti-jacinto-j784s4xevm-01-sidekick-01
+  annotations:
+    beaker-instance: "ti-jacinto-j784s4xevm-01-sidekick-01.auto.bos2.dc.example.com"
 spec:
   location:
     name: bos2-lab1
     rack: "311"
     tray: U2
-  containerImage: "quay.io/auto-lab/jumpstarter-exporter-bootc:0.6.1"
+  containerImage: "$( vars.ti-exporter-image )"
   addresses:
     - "{{ name }}.auto.bos2.dc.example.com"
   power:
