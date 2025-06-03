@@ -1,0 +1,100 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: exporterhosts.meta.jumpstarter.dev
+spec:
+  group: meta.jumpstarter.dev
+  names:
+    kind: ExporterHost
+    listKind: ExporterHostList
+    plural: exporterhosts
+    singular: exporterhost
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ExporterHost is the Schema for the exporterhosts API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ExporterHostSpec defines the desired state of ExporterHost.
+            properties:
+              addresses:
+                description: Addresses is a list of network addresses for the exporter
+                  host.
+                items:
+                  type: string
+                type: array
+              containerImage:
+                description: ContainerImage is the container image to be used for
+                  the exporter.
+                type: string
+              locationRef:
+                description: LocationRef references the physical location of the exporter
+                  host.
+                properties:
+                  name:
+                    description: Name is the name of the location (e.g., lab name).
+                    type: string
+                  rack:
+                    description: Rack is the rack identifier within the location.
+                    type: string
+                  tray:
+                    description: Tray is the tray identifier within the rack.
+                    type: string
+                type: object
+              power:
+                description: Power defines the power control configuration for the
+                  exporter host.
+                properties:
+                  snmp:
+                    description: SNMP defines the SNMP configuration for power control.
+                    properties:
+                      host:
+                        description: Host is the hostname or IP address of the SNMP-enabled
+                          PDU.
+                        type: string
+                      oid:
+                        description: OID is the SNMP OID for controlling the power
+                          outlet.
+                        type: string
+                      password:
+                        description: Password is the SNMP password.
+                        type: string
+                      plug:
+                        description: Plug is the outlet/plug number on the PDU.
+                        type: integer
+                      user:
+                        description: User is the SNMP username.
+                        type: string
+                    type: object
+                type: object
+            type: object
+          status:
+            description: ExporterHostStatus defines the observed state of ExporterHost.
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
