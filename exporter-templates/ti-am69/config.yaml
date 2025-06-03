@@ -9,6 +9,7 @@ spec:
     labels:
       device: "{{ name }}"
       board: ti-am69
+      board-revision: "1.1A"
       fleet: ti-am69-production
       ram: "32"
       cpu: "8"

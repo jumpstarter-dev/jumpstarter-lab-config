@@ -25,6 +25,7 @@ spec:
       device_console: "/dev/ttyUSB0"
   labels: # adds or overrides the template labels which will be applied to the exporter
     some: "label"
+    # disabled: "true"
   notes: |
     This is a J784S4x EVM device used for testing and development.
     It is located in the BOS2 data center, Lab1, Rack 311, Tray U3.

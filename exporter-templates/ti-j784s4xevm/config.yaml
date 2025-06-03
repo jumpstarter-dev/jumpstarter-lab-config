@@ -9,6 +9,7 @@ spec:
     labels:
       device: "{{ name }}"
       board: ti-j784s4xevm
+      board-revision: "1.0A"
       fleet: ti-j784s4xevm-production
       ram: "32"
       cpu: "8"
