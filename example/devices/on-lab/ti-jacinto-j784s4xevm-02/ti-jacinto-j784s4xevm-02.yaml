@@ -11,7 +11,7 @@ spec:
     tray: U5
   exporterHostRef:
     name: ti-jacinto-j784s4xevm-01-sidekick-02
-  jumpstarterControllerRef:
+  jumpstarterInstanceRef:
     name: "jump1-mpp"
   configTemplateRef:
     name: ti-j784s4xevm-exporter-template

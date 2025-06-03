@@ -1,0 +1,93 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: exporterinstances.meta.jumpstarter.dev
+spec:
+  group: meta.jumpstarter.dev
+  names:
+    kind: ExporterInstance
+    listKind: ExporterInstanceList
+    plural: exporterinstances
+    singular: exporterinstance
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ExporterInstance is the Schema for the exporterinstances API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ExporterInstanceSpec defines the desired state of ExporterInstance.
+            properties:
+              configTemplateRef:
+                description: ConfigTemplateRef defines the reference to a configuration
+                  template.
+                properties:
+                  name:
+                    type: string
+                  parameters:
+                    additionalProperties:
+                      type: string
+                    type: object
+                type: object
+              dutLocationRef:
+                description: DutLocationRef defines the location of the Device Under
+                  Test.
+                properties:
+                  name:
+                    type: string
+                  rack:
+                    type: string
+                  tray:
+                    type: string
+                type: object
+              exporterHostRef:
+                description: ExporterHostRef defines the reference to the exporter
+                  host.
+                properties:
+                  name:
+                    type: string
+                type: object
+              jumpstarterInstanceRef:
+                description: ControllerRef defines the reference to a controller.
+                properties:
+                  name:
+                    type: string
+                type: object
+              labels:
+                additionalProperties:
+                  type: string
+                type: object
+              notes:
+                type: string
+              type:
+                type: string
+            type: object
+          status:
+            description: ExporterInstanceStatus defines the observed state of ExporterInstance.
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

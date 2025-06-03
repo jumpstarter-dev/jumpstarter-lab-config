@@ -5,13 +5,13 @@ metadata:
   name: ti-jacinto-j784s4xevm-01
 spec:
   type: container
-  locationRef:
+  dutLocationRef:
     name: bos2-lab1
     rack: "311"
     tray: U3
   exporterHostRef:
     name: ti-jacinto-j784s4xevm-01-sidekick-01
-  jumpstarterControllerRef:
+  jumpstarterInstanceRef:
     name: "jump1-mpp"
   configTemplateRef:
     name: ti-j784s4xevm-exporter-template
@@ -21,7 +21,7 @@ spec:
       pdu_user: "$( vars.pdu_st_pro3_l1_311a_user )"
       pdu_password: "$( vars.pdu_st_pro3_l1_311a_password )"
       pdu_oid: "1.3.6.1.4.1.13742.6.4.1.2.1.2.1"
-      pdu_plug: 34
+      pdu_plug: "34"
       device_console: "/dev/ttyUSB0"
       location_name: "$( locationRef.name )"
   labels: # adds or overrides the template labels which will be applied to the exporter

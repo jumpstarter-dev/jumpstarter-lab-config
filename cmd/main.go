@@ -46,17 +46,9 @@ func init() {
 // nolint:gocyclo
 func main() {
 	// Load example
-	yamlFile, err := os.ReadFile("example/devices/on-lab/ti-jacinto-j784s4xevm-01/ti-jacinto-j784s4xevm-01-sidekick.yaml")
+	obj, err := readAndDecodeYAML("example/devices/on-lab/ti-jacinto-j784s4xevm-01/ti-jacinto-j784s4xevm-01-sidekick.yaml")
 	if err != nil {
-		fmt.Printf("Error reading YAML file: %v\n", err)
-		os.Exit(1)
-	}
-
-	codecFactory := serializer.NewCodecFactory(scheme, serializer.EnableStrict)
-	decode := codecFactory.UniversalDeserializer().Decode
-	obj, _, err := decode(yamlFile, nil, nil)
-	if err != nil {
-		fmt.Printf("Error decoding YAML: %v\n", err)
+		fmt.Printf("Error reading and decoding YAML: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -71,5 +63,36 @@ func main() {
 	fmt.Printf("ExporterHost ContainerImage: %s\n", exporterHost.Spec.ContainerImage)
 	fmt.Printf("ExporterHost SNMP Host: %s\n", exporterHost.Spec.Power.SNMP.Host)
 
+	obj, err = readAndDecodeYAML("example/devices/on-lab/ti-jacinto-j784s4xevm-01/ti-jacinto-j784s4xevm-01.yaml")
+	if err != nil {
+		fmt.Printf("Error reading and decoding YAML: %v\n", err)
+		os.Exit(1)
+	}
+
+	exporterInstance := obj.(*metav1alpha1.ExporterInstance)
+	if !ok {
+		fmt.Printf("Decoded object is not an ExporterInstance: %T\n", obj)
+		os.Exit(1)
+	}
+	fmt.Printf("Successfully loaded ExporterInstance: %+v\n", exporterInstance)
+	fmt.Printf("ExporterInstance Name: %s\n", exporterInstance.Name)
+	fmt.Printf("ExporterInstance Type: %s\n", exporterInstance.Spec.Type)
+	fmt.Printf("ExporterInstance DutLocationRef: %+v\n", exporterInstance.Spec.DutLocationRef)
+	fmt.Printf("ExporterInstance ExporterHostRef: %+v\n", exporterInstance.Spec.ExporterHostRef)
 	os.Exit(0)
+}
+
+func readAndDecodeYAML(filePath string) (runtime.Object, error) {
+	yamlFile, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading YAML file: %w", err)
+	}
+	codecFactory := serializer.NewCodecFactory(scheme, serializer.EnableStrict)
+	decode := codecFactory.UniversalDeserializer().Decode
+	obj, _, err := decode(yamlFile, nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding YAML: %w", err)
+	}
+
+	return obj, nil
 }
