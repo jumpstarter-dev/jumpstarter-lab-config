@@ -6,6 +6,6 @@ cliVersion: 4.6.0
 domain: meta.jumpstarter.dev
 layout:
 - go.kubebuilder.io/v4
-projectName: lab-management
-repo: github.com/jumpstarter-dev/jumpstarter/jumpstarter-lab-config
+projectName: jumpstarter-lab-config
+repo: github.com/jumpstarter-dev/jumpstarter-lab-config
 version: "3"
