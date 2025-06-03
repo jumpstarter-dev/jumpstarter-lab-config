@@ -1,0 +1,29 @@
+kind: ExporterAccessPolicy
+apiVersion: jumpstarter.dev/v1alpha1
+metadata:
+  name: dev-exporter-access
+  namespace: jumpstarter-lab
+spec:
+  exporterSelector:
+    matchLabels:
+      dut-purpose: development
+      stage: production
+  allowedClients:
+  - priority: 20
+    from:                # Administrators come first, highest priority
+    - clientSelector:
+        matchLabels:
+          user-type: administrator
+  - priority: 10        # Developers come next, maximum 2days
+    maximumDuration: 2d
+    from:
+    - clientSelector:
+        matchLabels:
+          user-type: developer
+  - priority: 5          # CI comes next, but only spot instances, can be deallocated
+    spotAccess: true
+    maximumDuration: 12h
+    from:
+    - clientSelector:
+        matchLabels:
+          user-type: ci

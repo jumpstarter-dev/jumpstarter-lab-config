@@ -6,6 +6,7 @@
 sources:
   locations: locations/*.yaml
   clients: clients/*.yaml
+  policies: policies/*.yaml
   exporter_hosts: devices/**/*-sidekick.yaml
   exporters: devices/**/*.yaml
   exporter_templates: exporter-templates/*.yaml
