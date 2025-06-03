@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"fmt"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -24,6 +25,7 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
@@ -37,12 +39,37 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
 	utilruntime.Must(metav1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
 // nolint:gocyclo
 func main() {
+	// Load example
+	yamlFile, err := os.ReadFile("example/devices/on-lab/ti-jacinto-j784s4xevm-01/ti-jacinto-j784s4xevm-01-sidekick.yaml")
+	if err != nil {
+		fmt.Printf("Error reading YAML file: %v\n", err)
+		os.Exit(1)
+	}
+
+	codecFactory := serializer.NewCodecFactory(scheme, serializer.EnableStrict)
+	decode := codecFactory.UniversalDeserializer().Decode
+	obj, _, err := decode(yamlFile, nil, nil)
+	if err != nil {
+		fmt.Printf("Error decoding YAML: %v\n", err)
+		os.Exit(1)
+	}
+
+	exporterHost, ok := obj.(*metav1alpha1.ExporterHost)
+	if !ok {
+		fmt.Printf("Decoded object is not an ExporterHost: %T\n", obj)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Successfully loaded ExporterHost: %+v\n", exporterHost)
+	fmt.Printf("ExporterHost Name: %s\n", exporterHost.Name)
+	fmt.Printf("ExporterHost ContainerImage: %s\n", exporterHost.Spec.ContainerImage)
+	fmt.Printf("ExporterHost SNMP Host: %s\n", exporterHost.Spec.Power.SNMP.Host)
+
 	os.Exit(0)
 }
