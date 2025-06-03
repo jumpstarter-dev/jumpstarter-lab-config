@@ -8,7 +8,7 @@ spec:
   # we let authentication with the OIDC provider
   username: rh:majopela
   labels: # adds or overrides the template labels which will be applied to the exporter
-    device: "{{ name }}"
+    device: "$( params.name )"
     board: ti-am69
     ram: "32"
     cpu: "8"

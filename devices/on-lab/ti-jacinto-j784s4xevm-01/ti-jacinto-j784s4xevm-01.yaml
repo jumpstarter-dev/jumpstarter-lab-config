@@ -16,13 +16,14 @@ spec:
   configTemplateRef:
     name: ti-j784s4xevm-exporter-template
     parameters:
-      device_address: "{{ name }}.auto.bos2.dc.example.com"
+      device_address: "$( name ).auto.bos2.dc.example.com"
       pdu_host: "some-pdu-hostname.auto.eng.bos2.bc.somedomain.com"
-      pdu_user: "{{ SECRETS.pdu_st_pro3_l1_311a_user }}"
-      pdu_password: "{{ SECRETS.pdu_st_pro3_l1_311a_password }}"
+      pdu_user: "$( vars.pdu_st_pro3_l1_311a_user )"
+      pdu_password: "$( vars.pdu_st_pro3_l1_311a_password )"
       pdu_oid: "1.3.6.1.4.1.13742.6.4.1.2.1.2.1"
       pdu_plug: 34
       device_console: "/dev/ttyUSB0"
+      location_name: "$( locationRef.name )"
   labels: # adds or overrides the template labels which will be applied to the exporter
     some: "label"
     # disabled: "true"

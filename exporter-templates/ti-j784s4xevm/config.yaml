@@ -5,26 +5,26 @@ metadata:
 spec:
   containerImage: quay.io/jumpstarter/jumpstarter:release-0.6
   exporterMetadata:
-    name: "{{ name }}"
+    name: "$( params.name )"
     labels:
-      device: "{{ name }}"
+      device: "$( params.name )"
       board: ti-j784s4xevm
       board-revision: "1.0A"
       fleet: ti-j784s4xevm-production
       ram: "32"
       cpu: "8"
-      location: "{{ location.name }}"
-  configTemplate: # this is the config file installed in /etc/jumpstarter/exporters/{{ name }}.yaml
+      location: "$( params.location_name )"
+  configTemplate: # this is the config file installed in /etc/jumpstarter/exporters/$( name )".yaml
     apiVersion: jumpstarter.dev/v1alpha1
     kind: ExporterConfigTemplate
     metadata:
-      namespace: "{{ namespace }}"
-      name: "{{ name }}"
-    endpoint: "{{ endpoint }}"
+      namespace: "$( params.namespace )"
+      name: "$( params.name )"
+    endpoint: "$( params.endpoint )"
     tls:
-      ca: {{ tls_ca }}
+      ca: $( tls_ca )"
       insecure: true
-    token: "{{ token }}"
+    token: "$( params.token )"
     grpcConfig:
       grpc.insecure: true
       grpc.keepalive_time_ms: 20000
@@ -42,7 +42,7 @@ spec:
         type: "jumpstarter_driver_pyserial.driver.PySerial"
         config:
           log_level: "DEBUG"
-          url: "{{ device_console }}"
+          url: "$( params.device_console )"
           #url: "socket://localhost:9997"
           baudrate: 115200
       power:
@@ -50,13 +50,13 @@ spec:
         config:
           timeout: 5
           log_level: "DEBUG"
-          host: "{{ pdu_host }}"
-          user: "{{ pdu_user }}"
-          password: "{{ pdu_password }}"
-          plug: "{{ pdu_plug }}"
-          oid: " {{ pdu_oid }}"
+          host: "$( params.pdu_host )"
+          user: "$( params.pdu_user )"
+          password: "$( params.pdu_password )"
+          plug: "$( params.pdu_plug )"
+          oid: " $( params.pdu_oid )"
       ssh:
         type: "jumpstarter_driver_network.driver.TcpNetwork"
         config:
-          host: "{{ device_address }}"
+          host: "$( params.device_address )"
           port: 22
