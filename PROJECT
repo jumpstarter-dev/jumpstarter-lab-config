@@ -33,4 +33,12 @@ resources:
   kind: ExporterConfigTemplate
   path: github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: jumpstarter.dev
+  group: meta
+  kind: JumpstarterInstance
+  path: github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1
+  version: v1alpha1
 version: "3"

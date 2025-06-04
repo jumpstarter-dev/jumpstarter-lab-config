@@ -93,6 +93,19 @@ func main() {
 	}
 	fmt.Printf("Successfully loaded ExporterInstance: %+v\n", exporterConfigTemplate)
 
+	obj, err = readAndDecodeYAML("example/jumpstarter-instances/jump-centos-sig.yaml")
+	if err != nil {
+		fmt.Printf("Error reading and decoding YAML: %v\n", err)
+		os.Exit(1)
+	}
+
+	jumpstarterInstance := obj.(*metav1alpha1.JumpstarterInstance)
+	if !ok {
+		fmt.Printf("Decoded object is not an JumpstarterInstance: %T\n", obj)
+		os.Exit(1)
+	}
+	fmt.Printf("Successfully loaded JumpstarterInstance: %+v\n", jumpstarterInstance)
+
 }
 
 func readAndDecodeYAML(filePath string) (runtime.Object, error) {
