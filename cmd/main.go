@@ -59,9 +59,6 @@ func main() {
 	}
 
 	fmt.Printf("Successfully loaded ExporterHost: %+v\n", exporterHost)
-	fmt.Printf("ExporterHost Name: %s\n", exporterHost.Name)
-	fmt.Printf("ExporterHost ContainerImage: %s\n", exporterHost.Spec.ContainerImage)
-	fmt.Printf("ExporterHost SNMP Host: %s\n", exporterHost.Spec.Power.SNMP.Host)
 
 	obj, err = readAndDecodeYAML("example/devices/on-lab/ti-jacinto-j784s4xevm-01/ti-jacinto-j784s4xevm-01.yaml")
 	if err != nil {
@@ -75,10 +72,6 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("Successfully loaded ExporterInstance: %+v\n", exporterInstance)
-	fmt.Printf("ExporterInstance Name: %s\n", exporterInstance.Name)
-	fmt.Printf("ExporterInstance Type: %s\n", exporterInstance.Spec.Type)
-	fmt.Printf("ExporterInstance DutLocationRef: %+v\n", exporterInstance.Spec.DutLocationRef)
-	fmt.Printf("ExporterInstance ExporterHostRef: %+v\n", exporterInstance.Spec.ExporterHostRef)
 
 	obj, err = readAndDecodeYAML("example/exporter-templates/ti-am69/config.yaml")
 	if err != nil {
@@ -105,6 +98,19 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("Successfully loaded JumpstarterInstance: %+v\n", jumpstarterInstance)
+
+	obj, err = readAndDecodeYAML("example/locations/bos2-lab1.yaml")
+	if err != nil {
+		fmt.Printf("Error reading and decoding YAML: %v\n", err)
+		os.Exit(1)
+	}
+
+	physicalLocation, ok := obj.(*metav1alpha1.PhysicalLocation)
+	if !ok {
+		fmt.Printf("Decoded object is not a PhysicalLocation: %T\n", obj)
+		os.Exit(1)
+	}
+	fmt.Printf("Successfully loaded PhysicalLocation: %+v\n", physicalLocation)
 
 }
 
