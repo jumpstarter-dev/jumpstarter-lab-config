@@ -82,6 +82,8 @@ spec:
                 type: string
               type:
                 type: string
+              username:
+                type: string
             type: object
           status:
             description: ExporterInstanceStatus defines the observed state of ExporterInstance.

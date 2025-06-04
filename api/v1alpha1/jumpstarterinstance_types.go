@@ -40,6 +40,11 @@ type JumpstarterInstanceSpec struct {
 	// or the namespace it primarily operates within.
 	// +kubebuilder:validation:Optional
 	Namespace string `json:"namespace,omitempty"`
+
+	// Notes provides additional information or comments about the Jumpstarter instance.
+	// This field can be used to document the purpose, configuration, or any other relevant details.
+	// +kubebuilder:validation:Optional
+	Notes string `json:"notes,omitempty"`
 }
 
 // JumpstarterInstanceStatus defines the observed state of JumpstarterInstance.

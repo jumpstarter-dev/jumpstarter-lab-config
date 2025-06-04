@@ -58,6 +58,11 @@ spec:
                   This could be the namespace where Jumpstarter components are deployed
                   or the namespace it primarily operates within.
                 type: string
+              notes:
+                description: |-
+                  Notes provides additional information or comments about the Jumpstarter instance.
+                  This field can be used to document the purpose, configuration, or any other relevant details.
+                type: string
             type: object
           status:
             description: JumpstarterInstanceStatus defines the observed state of JumpstarterInstance.

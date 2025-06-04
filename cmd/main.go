@@ -30,6 +30,8 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
 	metav1alpha1 "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
+	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
+	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/loader"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -45,73 +47,21 @@ func init() {
 
 // nolint:gocyclo
 func main() {
-	// Load example
-	obj, err := readAndDecodeYAML("example/devices/on-lab/ti-jacinto-j784s4xevm-01/ti-jacinto-j784s4xevm-01-sidekick.yaml")
+	// Load the configuration file
+	configFilePath := "jumpstarter-lab.yaml"
+	cfg, err := config.LoadConfig(configFilePath)
 	if err != nil {
-		fmt.Printf("Error reading and decoding YAML: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error loading config file %s: %v\n", configFilePath, err)
 		os.Exit(1)
 	}
 
-	exporterHost, ok := obj.(*metav1alpha1.ExporterHost)
-	if !ok {
-		fmt.Printf("Decoded object is not an ExporterHost: %T\n", obj)
-		os.Exit(1)
-	}
-
-	fmt.Printf("Successfully loaded ExporterHost: %+v\n", exporterHost)
-
-	obj, err = readAndDecodeYAML("example/devices/on-lab/ti-jacinto-j784s4xevm-01/ti-jacinto-j784s4xevm-01.yaml")
+	// Initialize the loaded configuration structure
+	loaded, err := loader.LoadAllResources(cfg)
 	if err != nil {
-		fmt.Printf("Error reading and decoding YAML: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error loading resources: %v\n", err)
 		os.Exit(1)
 	}
-
-	exporterInstance := obj.(*metav1alpha1.ExporterInstance)
-	if !ok {
-		fmt.Printf("Decoded object is not an ExporterInstance: %T\n", obj)
-		os.Exit(1)
-	}
-	fmt.Printf("Successfully loaded ExporterInstance: %+v\n", exporterInstance)
-
-	obj, err = readAndDecodeYAML("example/exporter-templates/ti-am69/config.yaml")
-	if err != nil {
-		fmt.Printf("Error reading and decoding YAML: %v\n", err)
-		os.Exit(1)
-	}
-
-	exporterConfigTemplate := obj.(*metav1alpha1.ExporterConfigTemplate)
-	if !ok {
-		fmt.Printf("Decoded object is not an ExporterConfigTemplate: %T\n", obj)
-		os.Exit(1)
-	}
-	fmt.Printf("Successfully loaded ExporterInstance: %+v\n", exporterConfigTemplate)
-
-	obj, err = readAndDecodeYAML("example/jumpstarter-instances/jump-centos-sig.yaml")
-	if err != nil {
-		fmt.Printf("Error reading and decoding YAML: %v\n", err)
-		os.Exit(1)
-	}
-
-	jumpstarterInstance := obj.(*metav1alpha1.JumpstarterInstance)
-	if !ok {
-		fmt.Printf("Decoded object is not an JumpstarterInstance: %T\n", obj)
-		os.Exit(1)
-	}
-	fmt.Printf("Successfully loaded JumpstarterInstance: %+v\n", jumpstarterInstance)
-
-	obj, err = readAndDecodeYAML("example/locations/bos2-lab1.yaml")
-	if err != nil {
-		fmt.Printf("Error reading and decoding YAML: %v\n", err)
-		os.Exit(1)
-	}
-
-	physicalLocation, ok := obj.(*metav1alpha1.PhysicalLocation)
-	if !ok {
-		fmt.Printf("Decoded object is not a PhysicalLocation: %T\n", obj)
-		os.Exit(1)
-	}
-	fmt.Printf("Successfully loaded PhysicalLocation: %+v\n", physicalLocation)
-
+	fmt.Printf("Configuration loaded successfully: %+v\n", loaded)
 }
 
 func readAndDecodeYAML(filePath string) (runtime.Object, error) {

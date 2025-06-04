@@ -26,6 +26,7 @@ type ExporterInstanceSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	Type                   string                 `json:"type,omitempty"`
+	Username               string                 `json:"username,omitempty"`
 	DutLocationRef         DutLocationRef         `json:"dutLocationRef,omitempty"`
 	ExporterHostRef        ExporterHostRef        `json:"exporterHostRef,omitempty"`
 	JumpstarterInstanceRef JumsptarterInstanceRef `json:"jumpstarterInstanceRef,omitempty"`
