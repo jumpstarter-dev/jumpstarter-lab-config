@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/spf13/cobra"
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -44,21 +46,38 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 }
 
+var rootCmd = &cobra.Command{
+	Use:   "jumpstarter-lab-config [config-file]",
+	Short: "Load and process jumpstarter lab configuration",
+	Long:  `A tool to load and process jumpstarter lab configuration files and their referenced resources.`,
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Determine config file path
+		configFilePath := "jumpstarter-lab.yaml" // default
+		if len(args) > 0 {
+			configFilePath = args[0]
+		}
+
+		// Load the configuration file
+		cfg, err := config.LoadConfig(configFilePath)
+		if err != nil {
+			return fmt.Errorf("error loading config file %s: %w", configFilePath, err)
+		}
+
+		// Initialize the loaded configuration structure
+		loaded, err := loader.LoadAllResources(cfg)
+		if err != nil {
+			return fmt.Errorf("error loading resources: %w", err)
+		}
+
+		fmt.Printf("Configuration loaded successfully: %+v\n", loaded)
+		return nil
+	},
+}
+
 // nolint:gocyclo
 func main() {
-	// Load the configuration file
-	configFilePath := "jumpstarter-lab.yaml"
-	cfg, err := config.LoadConfig(configFilePath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config file %s: %v\n", configFilePath, err)
+	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
-
-	// Initialize the loaded configuration structure
-	loaded, err := loader.LoadAllResources(cfg)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading resources: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("Configuration loaded successfully: %+v\n", loaded)
 }
