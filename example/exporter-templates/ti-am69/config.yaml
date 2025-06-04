@@ -14,7 +14,8 @@ spec:
       ram: "32"
       cpu: "8"
       location: "$( params.location_name )"
-  configTemplate: # this is the config file installed in /etc/jumpstarter/exporters/$( name )".yaml
+  configTemplate:  |
+    # this is the config file installed in /etc/jumpstarter/exporters/$( name )".yaml
     apiVersion: jumpstarter.dev/v1alpha1
     kind: ExporterConfigTemplate
     metadata:

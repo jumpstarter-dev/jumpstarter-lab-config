@@ -79,7 +79,20 @@ func main() {
 	fmt.Printf("ExporterInstance Type: %s\n", exporterInstance.Spec.Type)
 	fmt.Printf("ExporterInstance DutLocationRef: %+v\n", exporterInstance.Spec.DutLocationRef)
 	fmt.Printf("ExporterInstance ExporterHostRef: %+v\n", exporterInstance.Spec.ExporterHostRef)
-	os.Exit(0)
+
+	obj, err = readAndDecodeYAML("example/exporter-templates/ti-am69/config.yaml")
+	if err != nil {
+		fmt.Printf("Error reading and decoding YAML: %v\n", err)
+		os.Exit(1)
+	}
+
+	exporterConfigTemplate := obj.(*metav1alpha1.ExporterConfigTemplate)
+	if !ok {
+		fmt.Printf("Decoded object is not an ExporterConfigTemplate: %T\n", obj)
+		os.Exit(1)
+	}
+	fmt.Printf("Successfully loaded ExporterInstance: %+v\n", exporterConfigTemplate)
+
 }
 
 func readAndDecodeYAML(filePath string) (runtime.Object, error) {
