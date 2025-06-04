@@ -1,15 +1,21 @@
-
 # This is a basic configuration for the jumpstarter-lab-config tool
 # It defines the sources for locations, clients, exporter hosts, exporters,
 # exporter templates, and jumpstarter controllers.
 
 sources:
-  locations: locations/*.yaml
-  clients: clients/*.yaml
-  policies: policies/*.yaml
-  exporter_hosts: devices/*/*/*-sidekick.yaml
-  exporters: devices/*/*/*-dut.yaml
-  exporter_templates: exporter-templates/*/*.yaml
-  jumpstarter_instances: jumpstarter-instances/*.yaml
+  locations:
+    - locations/*.yaml
+  clients:
+    - clients/*.yaml
+  policies:
+    - policies/*.yaml
+  exporter_hosts:
+    - devices/*/*/*-sidekick.yaml
+  exporters:
+    - devices/*/*/*-dut.yaml
+  exporter_templates:
+    - exporter-templates/*/*.yaml
+  jumpstarter_instances:
+    - jumpstarter-instances/*.yaml
 variables:
   - vars.yaml

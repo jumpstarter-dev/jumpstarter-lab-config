@@ -54,24 +54,32 @@ func readAndDecodeYAMLFile(filePath string) (runtime.Object, error) {
 	return obj, nil
 }
 
-// processResourceGlob finds files matching a glob pattern, decodes them,
+// processResourceGlobs finds files matching a list of glob patterns, decodes them,
 // and stores them in the provided targetMap.
 // targetMap must be a pointer to a map (e.g., &loadedCfg.PhysicalLocations).
 // resourceTypeName is used for logging and error messages.
-func processResourceGlob(globPattern string, targetMap interface{}, resourceTypeName string) error {
-	if globPattern == "" {
-		return nil // Skip if the glob pattern is empty
+func processResourceGlobs(globPatterns []string, targetMap interface{}, resourceTypeName string) error {
+	if len(globPatterns) == 0 {
+		return nil // Skip if no glob patterns are provided
 	}
 
-	filePaths, err := filepath.Glob(globPattern)
-	if err != nil {
-		return fmt.Errorf("processResourceGlob: error evaluating glob pattern '%s' for %s: %w", globPattern, resourceTypeName, err)
+	var allFilePaths []string
+	for _, globPattern := range globPatterns {
+		if globPattern == "" {
+			continue // Skip empty patterns
+		}
+
+		filePaths, err := filepath.Glob(globPattern)
+		if err != nil {
+			return fmt.Errorf("processResourceGlobs: error evaluating glob pattern '%s' for %s: %w", globPattern, resourceTypeName, err)
+		}
+		allFilePaths = append(allFilePaths, filePaths...)
 	}
 
 	mapVal := reflect.ValueOf(targetMap).Elem()  // .Elem() because targetMap is a pointer to the map
 	expectedMapValueType := mapVal.Type().Elem() // e.g., *api.PhysicalLocation
 
-	for _, filePath := range filePaths {
+	for _, filePath := range allFilePaths {
 		obj, err := readAndDecodeYAMLFile(filePath)
 		if err != nil {
 			// Stop at first error encountered
@@ -89,11 +97,11 @@ func processResourceGlob(globPattern string, targetMap interface{}, resourceType
 
 		objValue := reflect.ValueOf(obj)
 		if !objValue.Type().AssignableTo(expectedMapValueType) {
-			return fmt.Errorf("processResourceGlob: file %s (name: %s) decoded to type %T, but expected assignable to %s for %s map", filePath, name, obj, expectedMapValueType, resourceTypeName)
+			return fmt.Errorf("processResourceGlobs: file %s (name: %s) decoded to type %T, but expected assignable to %s for %s map", filePath, name, obj, expectedMapValueType, resourceTypeName)
 		}
 
 		if mapVal.MapIndex(reflect.ValueOf(name)).IsValid() {
-			return fmt.Errorf("processResourceGlob: duplicate %s name: '%s' found in file %s", resourceTypeName, name, filePath)
+			return fmt.Errorf("processResourceGlobs: duplicate %s name: '%s' found in file %s", resourceTypeName, name, filePath)
 		}
 		mapVal.SetMapIndex(reflect.ValueOf(name), objValue)
 	}
@@ -112,7 +120,7 @@ func LoadAllResources(cfg *config.Config) (*LoadedLabConfig, error) {
 	}
 
 	type sourceMapping struct {
-		globPattern      string
+		globPatterns     []string
 		targetMap        interface{}
 		resourceTypeName string
 	}
@@ -126,7 +134,7 @@ func LoadAllResources(cfg *config.Config) (*LoadedLabConfig, error) {
 	}
 
 	for _, m := range mappings {
-		if err := processResourceGlob(m.globPattern, m.targetMap, m.resourceTypeName); err != nil {
+		if err := processResourceGlobs(m.globPatterns, m.targetMap, m.resourceTypeName); err != nil {
 			return nil, fmt.Errorf("failed to load %s: %w", m.resourceTypeName, err)
 		}
 	}
