@@ -40,6 +40,6 @@ func LoadConfig(filePath string) (*Config, error) {
 
 	// Set the base directory containing the config file
 	cfg.BaseDir = filepath.Dir(filePath)
-	
+
 	return &cfg, nil
 }
