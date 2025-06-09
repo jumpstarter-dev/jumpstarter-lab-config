@@ -43,32 +43,6 @@ func init() {
 	codecFactory = serializer.NewCodecFactory(scheme, serializer.EnableStrict)
 }
 
-// setSourceFile sets the sourceFile field on an object if it exists and is settable.
-func setSourceFile(obj runtime.Object, filePath string) error {
-	objValue := reflect.ValueOf(obj)
-
-	// Handle pointer to struct
-	if objValue.Kind() == reflect.Ptr && objValue.Elem().Kind() == reflect.Struct {
-		sourceFileField := objValue.Elem().FieldByName("sourceFile")
-		if sourceFileField.IsValid() && sourceFileField.CanSet() && sourceFileField.Kind() == reflect.String {
-			sourceFileField.SetString(filePath)
-			return nil
-		}
-	}
-
-	// Handle struct directly (though less common in Kubernetes objects)
-	if objValue.Kind() == reflect.Struct {
-		sourceFileField := objValue.FieldByName("sourceFile")
-		if sourceFileField.IsValid() && sourceFileField.CanSet() && sourceFileField.Kind() == reflect.String {
-			sourceFileField.SetString(filePath)
-			return nil
-		}
-	}
-
-	// sourceFile field not found or not settable - this is not an error
-	return nil
-}
-
 // readAndDecodeYAMLFile reads a YAML file and decodes it into a runtime.Object.
 func readAndDecodeYAMLFile(filePath string) (runtime.Object, error) {
 	yamlFile, err := os.ReadFile(filePath)
@@ -139,11 +113,6 @@ func processResourceGlobs(globPatterns []string, targetMap interface{}, resource
 			return fmt.Errorf("processResourceGlobs: duplicate %s name: '%s' found in file %s (originally defined in %s)", resourceTypeName, name, filePath, originalFile)
 		}
 
-		// Set the sourceFile field if it exists
-		if err := setSourceFile(obj, filePath); err != nil {
-			return fmt.Errorf("processResourceGlobs: failed to set sourceFile for %s from file %s: %w", resourceTypeName, filePath, err)
-		}
-
 		// Track the source file for this resource
 		if sourceFiles[resourceTypeName] == nil {
 			sourceFiles[resourceTypeName] = make(map[string]string)
@@ -176,7 +145,7 @@ func LoadAllResources(cfg *config.Config) (*LoadedLabConfig, error) {
 	mappings := []sourceMapping{
 		{cfg.Sources.Locations, &loaded.PhysicalLocations, "PhysicalLocation"},
 		{cfg.Sources.ExporterHosts, &loaded.ExporterHosts, "ExporterHost"},
-		{cfg.Sources.Exporters, &loaded.ExporterInstances, "ExporterInstance"}, // Assuming Sources.Exporters maps to ExporterInstance
+		{cfg.Sources.Exporters, &loaded.ExporterInstances, "ExporterInstance"},
 		{cfg.Sources.ExporterTemplates, &loaded.ExporterConfigTemplates, "ExporterConfigTemplate"},
 		{cfg.Sources.JumpstarterInstances, &loaded.JumpstarterInstances, "JumpstarterInstance"},
 	}

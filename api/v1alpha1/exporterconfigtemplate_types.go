@@ -67,13 +67,9 @@ type ExporterConfigTemplate struct {
 
 	Spec   ExporterConfigTemplateSpec   `json:"spec,omitempty"`
 	Status ExporterConfigTemplateStatus `json:"status,omitempty"`
-
-	// sourceFile is the path to the YAML file this resource was loaded from
-	sourceFile string `json:"-"`
 }
 
 // +kubebuilder:object:root=true
-
 // ExporterConfigTemplateList contains a list of ExporterConfigTemplate.
 type ExporterConfigTemplateList struct {
 	metav1.TypeMeta `json:",inline"`

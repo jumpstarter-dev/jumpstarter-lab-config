@@ -53,7 +53,8 @@ func validateReferences(loaded *loader.LoadedLabConfig) map[string][]string {
 		if host.Spec.LocationRef.Name != "" {
 			if _, exists := loaded.PhysicalLocations[host.Spec.LocationRef.Name]; !exists {
 				sourceFile := getSourceFile("ExporterHost", name)
-				addError(sourceFile, fmt.Sprintf("ExporterHost %s references non-existent location %s", name, host.Spec.LocationRef.Name))
+				addError(sourceFile, fmt.Sprintf("ExporterHost %s references non-existent location %s",
+					name, host.Spec.LocationRef.Name))
 			}
 		}
 	}
@@ -65,28 +66,32 @@ func validateReferences(loaded *loader.LoadedLabConfig) map[string][]string {
 		// Check DutLocationRef
 		if instance.Spec.DutLocationRef.Name != "" {
 			if _, exists := loaded.PhysicalLocations[instance.Spec.DutLocationRef.Name]; !exists {
-				addError(sourceFile, fmt.Sprintf("ExporterInstance %s references non-existent DUT location %s", name, instance.Spec.DutLocationRef.Name))
+				addError(sourceFile, fmt.Sprintf("ExporterInstance %s references non-existent DUT location %s",
+					name, instance.Spec.DutLocationRef.Name))
 			}
 		}
 
 		// Check ExporterHostRef
 		if instance.Spec.ExporterHostRef.Name != "" {
 			if _, exists := loaded.ExporterHosts[instance.Spec.ExporterHostRef.Name]; !exists {
-				addError(sourceFile, fmt.Sprintf("ExporterInstance %s references non-existent exporter host %s", name, instance.Spec.ExporterHostRef.Name))
+				addError(sourceFile, fmt.Sprintf("ExporterInstance %s references non-existent exporter host %s",
+					name, instance.Spec.ExporterHostRef.Name))
 			}
 		}
 
 		// Check JumpstarterInstanceRef
 		if instance.Spec.JumpstarterInstanceRef.Name != "" {
 			if _, exists := loaded.JumpstarterInstances[instance.Spec.JumpstarterInstanceRef.Name]; !exists {
-				addError(sourceFile, fmt.Sprintf("ExporterInstance %s references non-existent jumpstarter instance %s", name, instance.Spec.JumpstarterInstanceRef.Name))
+				addError(sourceFile, fmt.Sprintf("ExporterInstance %s references non-existent jumpstarter instance %s",
+					name, instance.Spec.JumpstarterInstanceRef.Name))
 			}
 		}
 
 		// Check ConfigTemplateRef
 		if instance.Spec.ConfigTemplateRef.Name != "" {
 			if _, exists := loaded.ExporterConfigTemplates[instance.Spec.ConfigTemplateRef.Name]; !exists {
-				addError(sourceFile, fmt.Sprintf("ExporterInstance %s references non-existent config template %s", name, instance.Spec.ConfigTemplateRef.Name))
+				addError(sourceFile, fmt.Sprintf("ExporterInstance %s references non-existent config template %s",
+					name, instance.Spec.ConfigTemplateRef.Name))
 			}
 		}
 	}

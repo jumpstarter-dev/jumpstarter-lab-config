@@ -81,13 +81,9 @@ type ExporterHost struct {
 
 	Spec   ExporterHostSpec   `json:"spec,omitempty"`
 	Status ExporterHostStatus `json:"status,omitempty"`
-
-	// sourceFile is the path to the YAML file this resource was loaded from
-	sourceFile string `json:"-"`
 }
 
 // +kubebuilder:object:root=true
-
 // ExporterHostList contains a list of ExporterHost.
 type ExporterHostList struct {
 	metav1.TypeMeta `json:",inline"`

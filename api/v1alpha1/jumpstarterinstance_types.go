@@ -63,9 +63,6 @@ type JumpstarterInstance struct {
 
 	Spec   JumpstarterInstanceSpec   `json:"spec,omitempty"`
 	Status JumpstarterInstanceStatus `json:"status,omitempty"`
-
-	// sourceFile is the path to the YAML file this resource was loaded from
-	sourceFile string `json:"-"`
 }
 
 // +kubebuilder:object:root=true

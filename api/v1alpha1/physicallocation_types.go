@@ -50,9 +50,6 @@ type PhysicalLocation struct {
 
 	Spec   PhysicalLocationSpec   `json:"spec,omitempty"`
 	Status PhysicalLocationStatus `json:"status,omitempty"`
-
-	// sourceFile is the path to the YAML file this resource was loaded from
-	sourceFile string `json:"-"`
 }
 
 // +kubebuilder:object:root=true
