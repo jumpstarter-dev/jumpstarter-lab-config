@@ -4,6 +4,43 @@ This repository proposes a gitops/configuration system and a tool for managing l
 and environments with jumpstarter controllers, exporter hosts (sidekicks), exporters,
 and clients in enterprise environments.
 
+## Installation
+
+### Quick Install (Recommended)
+
+Install the latest version using the install script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mangelajo/jumpstarter-lab-config/main/install.sh | bash
+```
+
+Or install a specific version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mangelajo/jumpstarter-lab-config/main/install.sh | bash -s v0.0.2
+```
+
+### Manual Installation
+
+1. Download the latest release from the [releases page](https://github.com/mangelajo/jumpstarter-lab-config/releases)
+2. Extract the binary for your platform
+3. Move it to a directory in your PATH (e.g., `~/.local/bin` or `/usr/local/bin`)
+4. Make it executable: `chmod +x jumpstarter-lab-config`
+
+### Verify Installation
+
+After installation, verify it works:
+
+```bash
+jumpstarter-lab-config --help
+```
+
+Make sure `~/.local/bin` is in your PATH by adding this to your shell profile:
+
+```bash
+export PATH="${HOME}/.local/bin:${PATH}"
+```
+
 ## Features
 
 * Linting of configuration files, to ensure they are valid and follow the expected format.
