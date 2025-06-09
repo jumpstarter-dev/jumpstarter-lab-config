@@ -25,7 +25,6 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/serializer"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
@@ -62,19 +61,4 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("Configuration loaded successfully: %+v\n", loaded)
-}
-
-func readAndDecodeYAML(filePath string) (runtime.Object, error) {
-	yamlFile, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("error reading YAML file: %w", err)
-	}
-	codecFactory := serializer.NewCodecFactory(scheme, serializer.EnableStrict)
-	decode := codecFactory.UniversalDeserializer().Decode
-	obj, _, err := decode(yamlFile, nil, nil)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding YAML: %w", err)
-	}
-
-	return obj, nil
 }

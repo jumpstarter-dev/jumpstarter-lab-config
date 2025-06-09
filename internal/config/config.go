@@ -14,13 +14,13 @@ type Config struct {
 
 // Sources defines the paths for various configuration files.
 type Sources struct {
-	Locations            string `yaml:"locations"`
-	Clients              string `yaml:"clients"`
-	Policies             string `yaml:"policies"`
-	ExporterHosts        string `yaml:"exporter_hosts"`
-	Exporters            string `yaml:"exporters"`
-	ExporterTemplates    string `yaml:"exporter_templates"`
-	JumpstarterInstances string `yaml:"jumpstarter_instances"`
+	Locations            []string `yaml:"locations"`
+	Clients              []string `yaml:"clients"`
+	Policies             []string `yaml:"policies"`
+	ExporterHosts        []string `yaml:"exporter_hosts"`
+	Exporters            []string `yaml:"exporters"`
+	ExporterTemplates    []string `yaml:"exporter_templates"`
+	JumpstarterInstances []string `yaml:"jumpstarter_instances"`
 }
 
 // LoadConfig reads a YAML file from the given filePath and unmarshals it into a Config struct.
