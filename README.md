@@ -29,6 +29,15 @@ Validating files from:
 
 ```
 
+You can also specify a custom configuration file:
+```shell
+$ jumpstarter-lab-config lint my-lab-config.yaml
+
+Validating files from my-lab-config.yaml...
+
+✅ All configurations are valid
+```
+
 Something is wrong with the configuration? The `lint` command will help you to find it.
 
 ```shell
@@ -72,6 +81,18 @@ Detected changes to apply:
 
 ```
 
+You can also specify a custom configuration file:
+```shell
+jumpstarter-lab-config apply --dry-run my-lab-config.yaml
+
+Reading files from my-lab-config.yaml...
+
+✅ All configurations are valid
+
+Detected changes to apply:
+...
+```
+
 ### Real apply to targets
 
 ```shell
@@ -102,6 +123,18 @@ Applying changes:
 ⚠️ Warning: there is a pending exporter to be deleted: ti-jacinto-j78s4xevm-44
             if you want to delete it, use --prune
 
+```
+
+You can also specify a custom configuration file:
+```shell
+jumpstarter-lab-config apply my-lab-config.yaml
+
+Reading files from my-lab-config.yaml...
+
+✅ All configurations are valid
+
+Applying changes:
+...
 ```
 
 
