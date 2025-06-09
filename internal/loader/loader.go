@@ -58,7 +58,8 @@ func readAndDecodeYAMLFile(filePath string) (runtime.Object, error) {
 // and stores them in the provided targetMap.
 // targetMap must be a pointer to a map (e.g., &loadedCfg.PhysicalLocations).
 // resourceTypeName is used for logging and error messages.
-func processResourceGlobs(globPatterns []string, targetMap interface{}, resourceTypeName string) error {
+// cfg contains the base directory to resolve relative paths against.
+func processResourceGlobs(globPatterns []string, targetMap interface{}, resourceTypeName string, cfg *config.Config) error {
 	if len(globPatterns) == 0 {
 		return nil // Skip if no glob patterns are provided
 	}
@@ -69,7 +70,9 @@ func processResourceGlobs(globPatterns []string, targetMap interface{}, resource
 			continue // Skip empty patterns
 		}
 
-		filePaths, err := filepath.Glob(globPattern)
+		// Resolve the glob pattern relative to the config directory
+		absoluteGlobPattern := filepath.Join(cfg.BaseDir, globPattern)
+		filePaths, err := filepath.Glob(absoluteGlobPattern)
 		if err != nil {
 			return fmt.Errorf("processResourceGlobs: error evaluating glob pattern '%s' for %s: %w", globPattern, resourceTypeName, err)
 		}
@@ -134,7 +137,7 @@ func LoadAllResources(cfg *config.Config) (*LoadedLabConfig, error) {
 	}
 
 	for _, m := range mappings {
-		if err := processResourceGlobs(m.globPatterns, m.targetMap, m.resourceTypeName); err != nil {
+		if err := processResourceGlobs(m.globPatterns, m.targetMap, m.resourceTypeName, cfg); err != nil {
 			return nil, fmt.Errorf("failed to load %s: %w", m.resourceTypeName, err)
 		}
 	}

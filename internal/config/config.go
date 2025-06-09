@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -10,6 +11,7 @@ import (
 type Config struct {
 	Sources   Sources  `yaml:"sources"`
 	Variables []string `yaml:"variables"`
+	BaseDir   string   `yaml:"-"` // Not serialized, set programmatically
 }
 
 // Sources defines the paths for various configuration files.
@@ -36,5 +38,8 @@ func LoadConfig(filePath string) (*Config, error) {
 		return nil, err
 	}
 
+	// Set the base directory containing the config file
+	cfg.BaseDir = filepath.Dir(filePath)
+	
 	return &cfg, nil
 }
