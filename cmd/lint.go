@@ -26,7 +26,7 @@ import (
 )
 
 // validateReferences checks that all cross-references between objects are valid
-func validateReferences(loaded *loader.LoadedLabConfig) error {
+func validateReferences(loaded *loader.LoadedLabConfig) []string {
 	var errors []string
 
 	// Validate ExporterHost LocationRef references
@@ -69,11 +69,7 @@ func validateReferences(loaded *loader.LoadedLabConfig) error {
 		}
 	}
 
-	if len(errors) > 0 {
-		return fmt.Errorf("found %d reference validation errors:\n- %s", len(errors), fmt.Sprintf("%s", errors[0]))
-	}
-
-	return nil
+	return errors
 }
 
 var lintCmd = &cobra.Command{
@@ -134,8 +130,13 @@ var lintCmd = &cobra.Command{
 		}
 
 		// Validate cross-references between objects
-		if err := validateReferences(loaded); err != nil {
-			return fmt.Errorf("reference validation failed: %w", err)
+		validationErrors := validateReferences(loaded)
+		if len(validationErrors) > 0 {
+			fmt.Printf("❌ Found %d reference validation errors:\n", len(validationErrors))
+			for _, err := range validationErrors {
+				fmt.Printf("  🔗 %s\n", err)
+			}
+			return fmt.Errorf("reference validation failed")
 		}
 
 		fmt.Println("✅ All configurations are valid")
