@@ -7,7 +7,7 @@ spec:
     matchLabels:
       dut-purpose: ci
       stage: production
-  allowedClients:
+  policies:
     - priority: 20
       from:                 # administrators have the highest priority
       - clientSelector:
@@ -21,7 +21,7 @@ spec:
             user-type: ci
     - priority: 5          # Developers come next, can take leases for up to 2 days, but can be dynamically de-allocated by higher priority clients (spot instance)
       spotAccess: true
-      maximumDuration: 2d
+      maximumDuration: 48h
       from:
       - clientSelector:
           matchLabels:

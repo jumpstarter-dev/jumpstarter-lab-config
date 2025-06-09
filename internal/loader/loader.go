@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 
+	jsApi "github.com/jumpstarter-dev/jumpstarter-controller/api/v1alpha1"
 	api "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
 
@@ -19,6 +20,8 @@ import (
 // LoadedLabConfig holds all unmarshalled resources from the configuration.
 // Resources are stored in maps keyed by their metadata.name.
 type LoadedLabConfig struct {
+	Clients                 map[string]*jsApi.Client
+	Policies                map[string]*jsApi.ExporterAccessPolicy
 	PhysicalLocations       map[string]*api.PhysicalLocation
 	ExporterHosts           map[string]*api.ExporterHost
 	ExporterInstances       map[string]*api.ExporterInstance
@@ -39,6 +42,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	// Register types from your local api/v1alpha1 package
 	utilruntime.Must(api.AddToScheme(scheme))
+	utilruntime.Must(jsApi.AddToScheme(scheme))
 
 	codecFactory = serializer.NewCodecFactory(scheme, serializer.EnableStrict)
 }
@@ -128,6 +132,8 @@ func processResourceGlobs(globPatterns []string, targetMap interface{}, resource
 // unmarshals them into their respective API types, and returns a LoadedLabConfig struct.
 func LoadAllResources(cfg *config.Config) (*LoadedLabConfig, error) {
 	loaded := &LoadedLabConfig{
+		Clients:                 make(map[string]*jsApi.Client),
+		Policies:                make(map[string]*jsApi.ExporterAccessPolicy),
 		PhysicalLocations:       make(map[string]*api.PhysicalLocation),
 		ExporterHosts:           make(map[string]*api.ExporterHost),
 		ExporterInstances:       make(map[string]*api.ExporterInstance),
@@ -143,6 +149,8 @@ func LoadAllResources(cfg *config.Config) (*LoadedLabConfig, error) {
 	}
 
 	mappings := []sourceMapping{
+		{cfg.Sources.Clients, &loaded.Clients, "Client"},
+		{cfg.Sources.Policies, &loaded.Policies, "ExporterAccessPolicy"},
 		{cfg.Sources.Locations, &loaded.PhysicalLocations, "PhysicalLocation"},
 		{cfg.Sources.ExporterHosts, &loaded.ExporterHosts, "ExporterHost"},
 		{cfg.Sources.Exporters, &loaded.ExporterInstances, "ExporterInstance"},

@@ -8,14 +8,14 @@ spec:
     matchLabels:
       dut-purpose: development
       stage: production
-  allowedClients:
+  policies:
   - priority: 20
     from:                # Administrators come first, highest priority
     - clientSelector:
         matchLabels:
           user-type: administrator
   - priority: 10        # Developers come next, maximum 2days
-    maximumDuration: 2d
+    maximumDuration: 48h
     from:
     - clientSelector:
         matchLabels:
