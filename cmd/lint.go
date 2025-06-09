@@ -163,7 +163,7 @@ var lintCmd = &cobra.Command{
 			for filename, errors := range errorsByFile {
 				fmt.Printf("📄 %s:\n", filename)
 				for _, err := range errors {
-					fmt.Printf("\t%s\n", err)
+					fmt.Printf("\t🔹 %s\n", err)
 				}
 				fmt.Println()
 			}

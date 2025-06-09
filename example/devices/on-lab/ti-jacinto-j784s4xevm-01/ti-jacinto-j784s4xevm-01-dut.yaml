@@ -12,9 +12,9 @@ spec:
   exporterHostRef:
     name: ti-jacinto-j784s4xevm-01-sidekick-01
   jumpstarterInstanceRef:
-    name: "jump1-mpp"
+    name: "jump1-mpp-bos"
   configTemplateRef:
-    name: ti-j784s4xevm-exporter-template
+    name: ti-j784s4xevm
     parameters:
       device_address: "$( name ).auto.bos2.dc.example.com"
       pdu_host: "some-pdu-hostname.auto.eng.bos2.bc.somedomain.com"
