@@ -5,6 +5,7 @@ go 1.24.0
 require (
 	github.com/jumpstarter-dev/jumpstarter-controller v0.5.1-0.20250606161717-bc276583f2c6
 	github.com/spf13/cobra v1.8.1
+	golang.org/x/crypto v0.36.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/apimachinery v0.33.0
 	k8s.io/client-go v0.33.0
