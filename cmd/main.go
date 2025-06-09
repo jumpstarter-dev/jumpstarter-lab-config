@@ -17,7 +17,6 @@ limitations under the License.
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -31,8 +30,6 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
 	metav1alpha1 "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
-	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
-	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/loader"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -47,32 +44,17 @@ func init() {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "jumpstarter-lab-config [config-file]",
-	Short: "Load and process jumpstarter lab configuration",
-	Long:  `A tool to load and process jumpstarter lab configuration files and their referenced resources.`,
-	Args:  cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// Determine config file path
-		configFilePath := "jumpstarter-lab.yaml" // default
-		if len(args) > 0 {
-			configFilePath = args[0]
-		}
+	Use:   "jumpstarter-lab-config",
+	Short: "A tool for managing labs and environments with jumpstarter controllers",
+	Long: `A gitops/configuration system and tool for managing labs and environments
+	with jumpstarter controllers, exporter hosts (sidekicks), exporters, and clients
+	in enterprise environments.`,
+}
 
-		// Load the configuration file
-		cfg, err := config.LoadConfig(configFilePath)
-		if err != nil {
-			return fmt.Errorf("error loading config file %s: %w", configFilePath, err)
-		}
-
-		// Initialize the loaded configuration structure
-		loaded, err := loader.LoadAllResources(cfg)
-		if err != nil {
-			return fmt.Errorf("error loading resources: %w", err)
-		}
-
-		fmt.Printf("Configuration loaded successfully: %+v\n", loaded)
-		return nil
-	},
+func init() {
+	// Add subcommands to root
+	rootCmd.AddCommand(lintCmd)
+	rootCmd.AddCommand(applyCmd)
 }
 
 // nolint:gocyclo
