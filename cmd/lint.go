@@ -25,6 +25,57 @@ import (
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/loader"
 )
 
+// validateReferences checks that all cross-references between objects are valid
+func validateReferences(loaded *loader.LoadedLabConfig) error {
+	var errors []string
+
+	// Validate ExporterHost LocationRef references
+	for name, host := range loaded.ExporterHosts {
+		if host.Spec.LocationRef.Name != "" {
+			if _, exists := loaded.PhysicalLocations[host.Spec.LocationRef.Name]; !exists {
+				errors = append(errors, fmt.Sprintf("ExporterHost %s references non-existent location %s", name, host.Spec.LocationRef.Name))
+			}
+		}
+	}
+
+	// Validate ExporterInstance references
+	for name, instance := range loaded.ExporterInstances {
+		// Check DutLocationRef
+		if instance.Spec.DutLocationRef.Name != "" {
+			if _, exists := loaded.PhysicalLocations[instance.Spec.DutLocationRef.Name]; !exists {
+				errors = append(errors, fmt.Sprintf("ExporterInstance %s references non-existent DUT location %s", name, instance.Spec.DutLocationRef.Name))
+			}
+		}
+
+		// Check ExporterHostRef
+		if instance.Spec.ExporterHostRef.Name != "" {
+			if _, exists := loaded.ExporterHosts[instance.Spec.ExporterHostRef.Name]; !exists {
+				errors = append(errors, fmt.Sprintf("ExporterInstance %s references non-existent exporter host %s", name, instance.Spec.ExporterHostRef.Name))
+			}
+		}
+
+		// Check JumpstarterInstanceRef
+		if instance.Spec.JumpstarterInstanceRef.Name != "" {
+			if _, exists := loaded.JumpstarterInstances[instance.Spec.JumpstarterInstanceRef.Name]; !exists {
+				errors = append(errors, fmt.Sprintf("ExporterInstance %s references non-existent jumpstarter instance %s", name, instance.Spec.JumpstarterInstanceRef.Name))
+			}
+		}
+
+		// Check ConfigTemplateRef
+		if instance.Spec.ConfigTemplateRef.Name != "" {
+			if _, exists := loaded.ExporterConfigTemplates[instance.Spec.ConfigTemplateRef.Name]; !exists {
+				errors = append(errors, fmt.Sprintf("ExporterInstance %s references non-existent config template %s", name, instance.Spec.ConfigTemplateRef.Name))
+			}
+		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("found %d reference validation errors:\n- %s", len(errors), fmt.Sprintf("%s", errors[0]))
+	}
+
+	return nil
+}
+
 var lintCmd = &cobra.Command{
 	Use:   "lint [config-file]",
 	Short: "Validate configuration files",
@@ -77,9 +128,14 @@ var lintCmd = &cobra.Command{
 		fmt.Println()
 
 		// Initialize the loaded configuration structure
-		_, err = loader.LoadAllResources(cfg)
+		loaded, err := loader.LoadAllResources(cfg)
 		if err != nil {
 			return fmt.Errorf("validation failed: %w", err)
+		}
+
+		// Validate cross-references between objects
+		if err := validateReferences(loaded); err != nil {
+			return fmt.Errorf("reference validation failed: %w", err)
 		}
 
 		fmt.Println("✅ All configurations are valid")
