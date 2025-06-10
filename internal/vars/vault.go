@@ -47,12 +47,16 @@ func NewVaultDecryptor(password string) *VaultDecryptor {
 
 // IsVaultEncrypted checks if a variable value is Ansible Vault encrypted
 func (v *Variables) IsVaultEncrypted(key string) bool {
-	value, exists := v.GetString(key)
+	value, exists := v.data[key]
 	if !exists {
 		return false
 	}
-
-	return strings.HasPrefix(value, "$ANSIBLE_VAULT;")
+	// Check if the value is a string and starts with the vault header
+	if strValue, ok := value.(string); ok {
+		return strings.HasPrefix(strValue, "$ANSIBLE_VAULT;")
+	} else {
+		return false // Not a string, cannot be vault encrypted
+	}
 }
 
 // Decrypt decrypts an Ansible Vault encrypted string

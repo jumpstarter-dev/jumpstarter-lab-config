@@ -29,8 +29,13 @@ bool_var: true
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
+	vars, err := NewVariables("")
+	if err != nil {
+		t.Fatalf("Failed to create Variables instance: %v", err)
+	}
+
 	// Test successful loading
-	vars, err := LoadFromFile(testFile)
+	err = vars.LoadFromFile(testFile)
 	if err != nil {
 		t.Fatalf("LoadFromFile failed: %v", err)
 	}
@@ -45,8 +50,14 @@ bool_var: true
 }
 
 func TestLoadFromFileErrors(t *testing.T) {
+
+	vars, err := NewVariables("")
+	if err != nil {
+		t.Fatalf("Failed to create Variables instance: %v", err)
+	}
+
 	// Test non-existent file
-	_, err := LoadFromFile("non_existent_file.yaml")
+	err = vars.LoadFromFile("non_existent_file.yaml")
 	if err == nil {
 		t.Error("Expected error for non-existent file")
 	}
@@ -64,7 +75,7 @@ func TestLoadFromFileErrors(t *testing.T) {
 		t.Fatalf("Failed to create invalid test file: %v", err)
 	}
 
-	_, err = LoadFromFile(invalidFile)
+	err = vars.LoadFromFile(invalidFile)
 	if err == nil {
 		t.Error("Expected error for invalid YAML")
 	}
@@ -79,61 +90,26 @@ func TestGet(t *testing.T) {
 		},
 	}
 
-	// Test existing key
-	value, exists := vars.Get("string_var")
-	if !exists {
-		t.Error("Expected key to exist")
-	}
-	if value != "test_value" {
-		t.Errorf("Expected 'test_value', got %v", value)
-	}
-
-	// Test non-existing key
-	_, exists = vars.Get("non_existent")
-	if exists {
-		t.Error("Expected key to not exist")
-	}
-
-	// Test different types
-	numValue, exists := vars.Get("number_var")
-	if !exists || numValue != 42 {
-		t.Errorf("Expected number 42, got %v (exists: %v)", numValue, exists)
-	}
-
-	boolValue, exists := vars.Get("bool_var")
-	if !exists || boolValue != true {
-		t.Errorf("Expected bool true, got %v (exists: %v)", boolValue, exists)
-	}
-}
-
-func TestGetString(t *testing.T) {
-	vars := &Variables{
-		data: map[string]interface{}{
-			"string_var": "test_value",
-			"number_var": 42,
-			"bool_var":   true,
-		},
-	}
-
 	// Test string value
-	value, exists := vars.GetString("string_var")
-	if !exists {
+	value, err := vars.Get("string_var")
+	if err != nil {
 		t.Error("Expected string key to exist")
 	}
+
 	if value != "test_value" {
 		t.Errorf("Expected 'test_value', got %s", value)
 	}
 
 	// Test non-string value
-	_, exists = vars.GetString("number_var")
-	if exists {
-		t.Error("Expected GetString to return false for non-string value")
+	_, err = vars.Get("number_var")
+	if err == nil {
+		t.Error("Expected failure for non-string key")
 	}
 
 	// Test non-existing key
-	_, exists = vars.GetString("non_existent")
-	if exists {
-		t.Error("Expected GetString to return false for non-existent key")
+	_, err = vars.Get("non_existent")
+	if err == nil {
+		t.Error("Expected error for non-existent key")
 	}
 }
 
@@ -194,15 +170,20 @@ func TestIntegrationWithExampleFile(t *testing.T) {
 	_, currentFile, _, _ := runtime.Caller(0)
 	currentDir := filepath.Dir(currentFile)
 	exampleFile := filepath.Join(currentDir, "..", "..", "example", "vars.yaml")
-	vars, err := LoadFromFile(exampleFile)
+	vars, err := NewVariables("")
+	if err != nil {
+		t.Fatalf("Failed to create Variables instance: %v", err)
+	}
+
+	err = vars.LoadFromFile(exampleFile)
 	if err != nil {
 		t.Fatalf("Failed to load example file: %v", err)
 	}
 
 	// Test ti-exporter-image
-	image, exists := vars.GetString("ti-exporter-image")
-	if !exists {
-		t.Error("Expected ti-exporter-image to exist")
+	image, err := vars.Get("ti-exporter-image")
+	if err != nil {
+		t.Error("Expected ti-exporter-image to exist:", err)
 	}
 	if image != "quay.io/auto-lab/jumpstarter-exporter-bootc:0.6.1" {
 		t.Errorf("Unexpected ti-exporter-image value: %s", image)
@@ -213,16 +194,13 @@ func TestIntegrationWithExampleFile(t *testing.T) {
 		t.Error("Expected snmp_password to be vault encrypted")
 	}
 
-	password, exists := vars.GetString("snmp_password")
-	if !exists {
-		t.Error("Expected snmp_password to exist")
-	}
 	if !vars.IsVaultEncrypted("snmp_password") {
 		t.Error("Expected snmp_password to be detected as vault encrypted")
 	}
 
-	// Verify the vault content starts correctly
-	if len(password) == 0 {
-		t.Error("Expected snmp_password to have content")
+	_, err = vars.Get("snmp_password")
+	if err == nil {
+		t.Error("Expected snmp_password to fail because password is not provided")
 	}
+
 }

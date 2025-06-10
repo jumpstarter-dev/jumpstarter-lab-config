@@ -9,45 +9,57 @@ import (
 
 // Variables represents a collection of variables loaded from a YAML file
 type Variables struct {
-	data map[string]interface{}
+	decryptor *VaultDecryptor // Optional decryptor for vault-encrypted variables
+	data      map[string]interface{}
+}
+
+func NewVariables(vaultPasswordFile string) (*Variables, error) {
+	var decryptor *VaultDecryptor
+
+	if vaultPasswordFile == "" {
+		if os.Getenv("ANSIBLE_VAULT_PASSWORD_FILE") != "" {
+			vaultPasswordFile = os.Getenv("ANSIBLE_VAULT_PASSWORD_FILE")
+		} else if os.Getenv("ANSIBLE_VAULT_PASSWORD") != "" {
+			// If ANSIBLE_VAULT_PASSWORD is set, use it directly
+			decryptor = NewVaultDecryptor(os.Getenv("ANSIBLE_VAULT_PASSWORD"))
+		}
+	}
+
+	if vaultPasswordFile != "" {
+		password, err := os.ReadFile(vaultPasswordFile)
+		if err != nil {
+			return nil, fmt.Errorf("error reading vault password file %s: %w", vaultPasswordFile, err)
+		}
+		decryptor = NewVaultDecryptor(string(password))
+	}
+
+	return &Variables{
+		decryptor: decryptor,
+		data:      make(map[string]interface{}),
+	}, nil
 }
 
 // LoadFromFile loads variables from a YAML file
-func LoadFromFile(filePath string) (*Variables, error) {
+func (v *Variables) LoadFromFile(filePath string) error {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("error reading variables file %s: %w", filePath, err)
+		return fmt.Errorf("error reading variables file %s: %w", filePath, err)
 	}
 
 	var varData map[string]interface{}
 	err = yaml.Unmarshal(data, &varData)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing YAML from file %s: %w", filePath, err)
+		return fmt.Errorf("error parsing YAML from file %s: %w", filePath, err)
 	}
 
-	return &Variables{
-		data: varData,
-	}, nil
-}
-
-// Get retrieves a variable value by key
-func (v *Variables) Get(key string) (interface{}, bool) {
-	value, exists := v.data[key]
-	return value, exists
-}
-
-// GetString retrieves a variable value as a string
-func (v *Variables) GetString(key string) (string, bool) {
-	value, exists := v.data[key]
-	if !exists {
-		return "", false
+	// Merge the loaded variables into the existing data, failing if a key already exists
+	for key, value := range varData {
+		if _, exists := v.data[key]; exists {
+			return fmt.Errorf("variable %s already exists, cannot overwrite with variable from file: %s", key, filePath)
+		}
+		v.data[key] = value
 	}
-
-	if str, ok := value.(string); ok {
-		return str, true
-	}
-
-	return "", false
+	return nil
 }
 
 // GetAllKeys returns all variable keys
@@ -66,19 +78,24 @@ func (v *Variables) Has(key string) bool {
 }
 
 // GetDecrypted retrieves and decrypts a vault-encrypted variable
-func (v *Variables) GetDecrypted(key string, decryptor *VaultDecryptor) (string, error) {
-	value, exists := v.GetString(key)
+func (v *Variables) Get(key string) (string, error) {
+	value, exists := v.data[key]
 	if !exists {
 		return "", fmt.Errorf("variable %s not found", key)
 	}
+	strValue, ok := value.(string)
+
+	if !ok {
+		return "", fmt.Errorf("variable %s is not a string", key)
+	}
 
 	if !v.IsVaultEncrypted(key) {
-		return value, nil
+		return strValue, nil
 	}
 
-	if decryptor == nil {
-		return "", fmt.Errorf("vault decryptor required for encrypted variable %s", key)
+	if v.decryptor == nil {
+		return "", fmt.Errorf("ANSIBLE_VAULT_PASSWORD_FILE or ANSIBLE_VAULT_PASSWORD required for encrypted key %s", key)
 	}
 
-	return decryptor.Decrypt(value)
+	return v.decryptor.Decrypt(strValue)
 }

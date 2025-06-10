@@ -2,6 +2,14 @@ package vars
 
 import "testing"
 
+// test_secret encrypted with password "test_password"
+const VAULT_DATA = `$ANSIBLE_VAULT;1.1;AES256
+66313930643739626237323731663838613636363336346334356662623932653534306263656233
+3230316330383937363134383661353534393139393263620a396462343137316236633438316635
+66613264356433323739376564666632353761633965363665363737333463653339386339336361
+3232336361363734340a373364626431333937363662353139303637303435373132366434313139
+3132`
+
 func TestIsVaultEncrypted(t *testing.T) {
 	vars := &Variables{
 		data: map[string]interface{}{
@@ -34,26 +42,17 @@ func TestIsVaultEncrypted(t *testing.T) {
 
 func TestVaultDecryption(t *testing.T) {
 	// Create a simple vault-encrypted value for testing
-	// This is a known encrypted value that decrypts to "test_secret" with password "test_password"
-	vaultData := `$ANSIBLE_VAULT;1.1;AES256
-66633039663439653738663439653738663439653738663439653738663439653738663439653738
-6634396537386634396537386634396537386634396537380a663439653738663439653738663439
-653738663439653738663439653738663439653738663439653738663439653738663439653738
-6634396537386634396537386634396537386634396537380a663439653738663439653738663439
-6537386634396537386634396537386634396537386634396537386634396537386634396537386634
-39653738`
 
 	vars := &Variables{
 		data: map[string]interface{}{
 			"plain_var":     "plain_value",
-			"encrypted_var": vaultData,
+			"encrypted_var": VAULT_DATA,
 		},
+		decryptor: NewVaultDecryptor("test_password"),
 	}
 
-	decryptor := NewVaultDecryptor("test_password")
-
 	// Test decrypting plain variable (should return as-is)
-	result, err := vars.GetDecrypted("plain_var", decryptor)
+	result, err := vars.Get("plain_var")
 	if err != nil {
 		t.Errorf("Unexpected error for plain variable: %v", err)
 	}
@@ -62,13 +61,51 @@ func TestVaultDecryption(t *testing.T) {
 	}
 
 	// Test decrypting without decryptor
-	_, err = vars.GetDecrypted("encrypted_var", nil)
-	if err == nil {
-		t.Error("Expected error when decrypting without decryptor")
+	decrypted, err := vars.Get("encrypted_var")
+	if err != nil {
+		t.Error("Expected decryption to work", err)
+	}
+
+	if decrypted != "test_secret" {
+		t.Errorf("Expected decrypted value to be 'test_secret', got %s", decrypted)
 	}
 
 	// Test non-existent variable
-	_, err = vars.GetDecrypted("non_existent", decryptor)
+	_, err = vars.Get("non_existent")
+	if err == nil {
+		t.Error("Expected error for non-existent variable")
+	}
+}
+
+func TestVaultDecryptionPasswdFile(t *testing.T) {
+	// Create a simple vault-encrypted value for testing
+	// This is a known encrypted value that decrypts to "test_secret" with password "test_password"
+
+	vars := &Variables{
+		data: map[string]interface{}{
+			"plain_var":     "plain_value",
+			"encrypted_var": VAULT_DATA,
+		},
+		decryptor: NewVaultDecryptor("test_password"),
+	}
+
+	// Test decrypting plain variable (should return as-is)
+	result, err := vars.Get("plain_var")
+	if err != nil {
+		t.Errorf("Unexpected error for plain variable: %v", err)
+	}
+	if result != "plain_value" {
+		t.Errorf("Expected 'plain_value', got %s", result)
+	}
+
+	// Test decrypting without decryptor
+	_, err = vars.Get("encrypted_var")
+	if err != nil {
+		t.Error("Expected decryption to work: ", err)
+	}
+
+	// Test non-existent variable
+	_, err = vars.Get("non_existent")
 	if err == nil {
 		t.Error("Expected error for non-existent variable")
 	}
