@@ -99,3 +99,12 @@ func (v *Variables) Get(key string) (string, error) {
 
 	return v.decryptor.Decrypt(strValue)
 }
+
+// mostly used for testing purposes
+func (v *Variables) Set(key string, value string) error {
+	if _, exists := v.data[key]; exists {
+		return fmt.Errorf("variable %s already exists, cannot overwrite", key)
+	}
+	v.data[key] = value
+	return nil
+}
