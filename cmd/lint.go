@@ -105,6 +105,7 @@ var lintCmd = &cobra.Command{
 	Long:  `Lint and validate configuration files to ensure they are valid and follow the expected format.`,
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		vaultPassFile, _ := cmd.Flags().GetString("vault-password-file")
 		// Determine config file path
 		configFilePath := "jumpstarter-lab.yaml" // default
 		if len(args) > 0 {
@@ -151,7 +152,7 @@ var lintCmd = &cobra.Command{
 		fmt.Println()
 
 		// Initialize the loaded configuration structure
-		loaded, err := loader.LoadAllResources(cfg)
+		loaded, err := loader.LoadAllResources(cfg, vaultPassFile)
 		if err != nil {
 			return fmt.Errorf("validation failed: %w", err)
 		}
@@ -175,7 +176,17 @@ var lintCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		keys := loaded.Variables.GetAllKeys()
+		fmt.Printf("📚 Total Variables: %d\n", len(keys))
+		fmt.Println("")
 		fmt.Println("✅ All configurations are valid")
 		return nil
 	},
+}
+
+func init() {
+	// Add the vault password file flag
+	lintCmd.Flags().String("vault-password-file", "", "Path to the vault password file for decrypting variables")
+	// Add the lint command to the root command
+	rootCmd.AddCommand(lintCmd)
 }

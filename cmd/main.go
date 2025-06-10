@@ -51,12 +51,6 @@ var rootCmd = &cobra.Command{
 	in enterprise environments.`,
 }
 
-func init() {
-	// Add subcommands to root
-	rootCmd.AddCommand(lintCmd)
-	rootCmd.AddCommand(applyCmd)
-}
-
 // nolint:gocyclo
 func main() {
 	if err := rootCmd.Execute(); err != nil {

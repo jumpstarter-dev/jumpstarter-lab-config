@@ -9,6 +9,7 @@ import (
 	jsApi "github.com/jumpstarter-dev/jumpstarter-controller/api/v1alpha1"
 	api "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
+	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/vars"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -27,6 +28,7 @@ type LoadedLabConfig struct {
 	ExporterInstances       map[string]*api.ExporterInstance
 	ExporterConfigTemplates map[string]*api.ExporterConfigTemplate
 	JumpstarterInstances    map[string]*api.JumpstarterInstance
+	Variables               *vars.Variables // Variables loaded from the config
 
 	// SourceFiles tracks which file each resource was loaded from
 	// Format: SourceFiles[objectType][objectName] = filename
@@ -130,7 +132,13 @@ func processResourceGlobs(globPatterns []string, targetMap interface{}, resource
 
 // LoadAllResources processes the configuration sources, loads all specified YAML files,
 // unmarshals them into their respective API types, and returns a LoadedLabConfig struct.
-func LoadAllResources(cfg *config.Config) (*LoadedLabConfig, error) {
+func LoadAllResources(cfg *config.Config, vaultPassFile string) (*LoadedLabConfig, error) {
+
+	variables, err := vars.NewVariables(vaultPassFile)
+	if err != nil {
+		return nil, fmt.Errorf("LoadAllResources: failed to create Variables instance: %w", err)
+	}
+
 	loaded := &LoadedLabConfig{
 		Clients:                 make(map[string]*jsApi.Client),
 		Policies:                make(map[string]*jsApi.ExporterAccessPolicy),
@@ -140,6 +148,7 @@ func LoadAllResources(cfg *config.Config) (*LoadedLabConfig, error) {
 		ExporterConfigTemplates: make(map[string]*api.ExporterConfigTemplate),
 		JumpstarterInstances:    make(map[string]*api.JumpstarterInstance),
 		SourceFiles:             make(map[string]map[string]string),
+		Variables:               variables,
 	}
 
 	type sourceMapping struct {
@@ -161,6 +170,15 @@ func LoadAllResources(cfg *config.Config) (*LoadedLabConfig, error) {
 	for _, m := range mappings {
 		if err := processResourceGlobs(m.globPatterns, m.targetMap, m.resourceTypeName, cfg, loaded.SourceFiles); err != nil {
 			return nil, fmt.Errorf("failed to load %s: %w", m.resourceTypeName, err)
+		}
+	}
+
+	for _, filePath := range cfg.Variables {
+		// calculate filepath based on the config's base directory
+		baseDirPath := filepath.Join(cfg.BaseDir, filePath)
+		fmt.Println("Loading variables from:", baseDirPath)
+		if err := variables.LoadFromFile(baseDirPath); err != nil {
+			return nil, fmt.Errorf("LoadAllResources: error loading variables from file %s: %w", filePath, err)
 		}
 	}
 

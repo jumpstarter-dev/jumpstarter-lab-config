@@ -33,6 +33,7 @@ var applyCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		prune, _ := cmd.Flags().GetBool("prune")
+		vaultPassFile, _ := cmd.Flags().GetString("vault-password-file")
 
 		// Determine config file path
 		configFilePath := "jumpstarter-lab.yaml" // default
@@ -80,7 +81,7 @@ var applyCmd = &cobra.Command{
 		fmt.Println()
 
 		// Initialize the loaded configuration structure
-		_, err = loader.LoadAllResources(cfg)
+		_, err = loader.LoadAllResources(cfg, vaultPassFile)
 		if err != nil {
 			return fmt.Errorf("error loading resources: %w", err)
 		}
@@ -110,4 +111,7 @@ func init() {
 	// Add flags to apply command
 	applyCmd.Flags().Bool("dry-run", false, "Show what would be applied without making changes")
 	applyCmd.Flags().Bool("prune", false, "Delete resources that are no longer defined in configuration")
+	applyCmd.Flags().String("vault-password-file", "", "Path to the vault password file for decrypting variables")
+
+	rootCmd.AddCommand(applyCmd)
 }
