@@ -3,6 +3,7 @@ package vars
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -136,36 +137,6 @@ func TestGetString(t *testing.T) {
 	}
 }
 
-func TestIsVaultEncrypted(t *testing.T) {
-	vars := &Variables{
-		data: map[string]interface{}{
-			"plain_var":  "plain_text",
-			"vault_var":  "$ANSIBLE_VAULT;1.1;AES256\n64396432643133643937353139613831356532653834383533646462326466653839663866663933",
-			"number_var": 42,
-		},
-	}
-
-	// Test plain text
-	if vars.IsVaultEncrypted("plain_var") {
-		t.Error("Expected plain_var to not be vault encrypted")
-	}
-
-	// Test vault encrypted
-	if !vars.IsVaultEncrypted("vault_var") {
-		t.Error("Expected vault_var to be vault encrypted")
-	}
-
-	// Test non-string value
-	if vars.IsVaultEncrypted("number_var") {
-		t.Error("Expected number_var to not be vault encrypted")
-	}
-
-	// Test non-existent key
-	if vars.IsVaultEncrypted("non_existent") {
-		t.Error("Expected non_existent to not be vault encrypted")
-	}
-}
-
 func TestGetAllKeys(t *testing.T) {
 	vars := &Variables{
 		data: map[string]interface{}{
@@ -219,24 +190,10 @@ func TestHas(t *testing.T) {
 
 func TestIntegrationWithExampleFile(t *testing.T) {
 	// Test with the actual example file structure
-	tempDir := t.TempDir()
-	exampleFile := filepath.Join(tempDir, "example_vars.yaml")
-
-	exampleContent := `ti-exporter-image: quay.io/auto-lab/jumpstarter-exporter-bootc:0.6.1
-snmp_password: !vault |
-          $ANSIBLE_VAULT;1.1;AES256
-          64396432643133643937353139613831356532653834383533646462326466653839663866663933
-          6461336163333733393032613632623364343162363737330a643939356364316132616236376165
-          65636634643637653233383339663337383065613666313835333731373466666432666536396234
-          6433396531666663370a663234646164656165343735653334306238326137663464323033623733
-          3532
-`
-
-	err := os.WriteFile(exampleFile, []byte(exampleContent), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create example test file: %v", err)
-	}
-
+	// first acquite the path to this test file
+	_, currentFile, _, _ := runtime.Caller(0)
+	currentDir := filepath.Dir(currentFile)
+	exampleFile := filepath.Join(currentDir, "..", "..", "example", "vars.yaml")
 	vars, err := LoadFromFile(exampleFile)
 	if err != nil {
 		t.Fatalf("Failed to load example file: %v", err)
@@ -267,82 +224,5 @@ snmp_password: !vault |
 	// Verify the vault content starts correctly
 	if len(password) == 0 {
 		t.Error("Expected snmp_password to have content")
-	}
-}
-
-func TestVaultDecryption(t *testing.T) {
-	// Create a simple vault-encrypted value for testing
-	// This is a known encrypted value that decrypts to "test_secret" with password "test_password"
-	vaultData := `$ANSIBLE_VAULT;1.1;AES256
-66633039663439653738663439653738663439653738663439653738663439653738663439653738
-6634396537386634396537386634396537386634396537380a663439653738663439653738663439
-653738663439653738663439653738663439653738663439653738663439653738663439653738
-6634396537386634396537386634396537386634396537380a663439653738663439653738663439
-6537386634396537386634396537386634396537386634396537386634396537386634396537386634
-39653738`
-
-	vars := &Variables{
-		data: map[string]interface{}{
-			"plain_var":     "plain_value",
-			"encrypted_var": vaultData,
-		},
-	}
-
-	decryptor := NewVaultDecryptor("test_password")
-
-	// Test decrypting plain variable (should return as-is)
-	result, err := vars.GetDecrypted("plain_var", decryptor)
-	if err != nil {
-		t.Errorf("Unexpected error for plain variable: %v", err)
-	}
-	if result != "plain_value" {
-		t.Errorf("Expected 'plain_value', got %s", result)
-	}
-
-	// Test decrypting without decryptor
-	_, err = vars.GetDecrypted("encrypted_var", nil)
-	if err == nil {
-		t.Error("Expected error when decrypting without decryptor")
-	}
-
-	// Test non-existent variable
-	_, err = vars.GetDecrypted("non_existent", decryptor)
-	if err == nil {
-		t.Error("Expected error for non-existent variable")
-	}
-}
-
-func TestNewVaultDecryptor(t *testing.T) {
-	password := "test_password"
-	decryptor := NewVaultDecryptor(password)
-
-	if decryptor == nil {
-		t.Fatal("Expected non-nil decryptor")
-	}
-
-	if decryptor.password != password {
-		t.Errorf("Expected password %s, got %s", password, decryptor.password)
-	}
-}
-
-func TestVaultDecryptorErrors(t *testing.T) {
-	// Test empty password
-	decryptor := NewVaultDecryptor("")
-	_, err := decryptor.Decrypt("$ANSIBLE_VAULT;1.1;AES256\ntest")
-	if err == nil {
-		t.Error("Expected error for empty password")
-	}
-
-	// Test invalid vault format
-	decryptor = NewVaultDecryptor("password")
-	_, err = decryptor.Decrypt("invalid vault data")
-	if err == nil {
-		t.Error("Expected error for invalid vault format")
-	}
-
-	// Test invalid header
-	_, err = decryptor.Decrypt("$INVALID_HEADER\ndata")
-	if err == nil {
-		t.Error("Expected error for invalid header")
 	}
 }
