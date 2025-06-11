@@ -214,3 +214,70 @@ func TestProcessTemplate_MissingVariable(t *testing.T) {
 		t.Errorf("expected error for missing variable, got nil")
 	}
 }
+
+func TestProcessTemplate_RecursiveReplacements(t *testing.T) {
+	varsMock, err := vars.NewVariables("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = varsMock.Set("a", "$(var.b)")
+	_ = varsMock.Set("b", "$(var.c)")
+	_ = varsMock.Set("c", "42")
+
+	params := &Parameters{
+		parameters: map[string]string{},
+	}
+
+	input := "Value of a: $(var.a)"
+	expected := "Value of a: 42"
+	result, err := ProcessTemplate(input, varsMock, params)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+func TestProcessTemplate_RecursiveReplacements_Limit(t *testing.T) {
+	varsMock, err := vars.NewVariables("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = varsMock.Set("a", "$(var.a)") // Recursive definition
+
+	params := &Parameters{
+		parameters: map[string]string{},
+	}
+
+	input := "Value of a: $(var.a)"
+	expectedRecursionError := "templating: recursion limit reached while applying replacements, "
+	expectedRecursionError += "check for circular references, like: var.a => $(var.a)"
+	_, err = ProcessTemplate(input, varsMock, params)
+	if err == nil {
+		t.Errorf("expected error for recursive replacement, got nil")
+	} else if err.Error() != expectedRecursionError {
+		t.Errorf("unexpected recursion limit error, got %v", err)
+	}
+}
+
+// Test templating when introducing an ansible vault encrypted variable that can't be decrypted
+func TestProcessTemplate_VaultDecryptionError(t *testing.T) {
+	varsMock, err := vars.NewVariables("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Set a vault-encrypted variable that cannot be decrypted
+	_ = varsMock.Set("vault_var", "$ANSIBLE_VAULT;1.1;AES256\n  6162636465666768696a6b6c6d6e6f70\n")
+
+	params := &Parameters{
+		parameters: map[string]string{},
+	}
+
+	input := "Vault variable: $(var.vault_var)"
+	_, err = ProcessTemplate(input, varsMock, params)
+	if err == nil || err.Error() != "templating: error retrieving variable 'vault_var': "+
+		"ANSIBLE_VAULT_PASSWORD_FILE or ANSIBLE_VAULT_PASSWORD required for encrypted key vault_var" {
+		t.Errorf("unexpected error message, got %v", err)
+	}
+}

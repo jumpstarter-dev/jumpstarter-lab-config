@@ -14,7 +14,7 @@ func ProcessTemplate(data string, variables *vars.Variables, parameters *Paramet
 	if needsReplacements(data) {
 		replacements, err := constructReplacementMap(variables, parameters)
 		if err != nil {
-			return "", fmt.Errorf("templating: error constructing replacement map: %w", err)
+			return "", err
 		}
 		return applyReplacements(data, replacements)
 	}
@@ -36,7 +36,7 @@ func constructReplacementMap(variables *vars.Variables, parameters *Parameters) 
 	for _, key := range variables.GetAllKeys() {
 		value, err := variables.Get(key)
 		if err != nil {
-			return nil, fmt.Errorf("templateing: error retrieving variable %s: %w", key, err)
+			return nil, fmt.Errorf("templating: error retrieving variable '%s': %w", key, err)
 		}
 		replacements["var."+key] = value
 	}
@@ -50,11 +50,36 @@ func constructReplacementMap(variables *vars.Variables, parameters *Parameters) 
 }
 
 func applyReplacements(data string, replacements map[string]string) (string, error) {
-	// Apply replacements to the data
-	for key, value := range replacements {
-		// the key can be preceded, and followed by spaces or tabs, the regex should
-		// handle this too
-		data = regexp.MustCompile(`\$\(\s*`+key+`\s*\)`).ReplaceAllString(data, value)
+	const RECURSION_LIMIT = 10 // Limit iterations to prevent infinite loops, i.e. var.a = $(var.a) or similar
+	var (
+		i                               int
+		replacementsContainReplacements bool
+		recursiveReplacementInfo        string
+	)
+
+	for i = 0; i < RECURSION_LIMIT; i++ {
+		// DEBUG: fmt.Printf("Applying replacements, iteration %d, input: %s\n", i, data)
+		replacementsContainReplacements = false
+		// Apply replacements to the data
+		for key, value := range replacements {
+			keyRegexp := regexp.MustCompile(`\$\(\s*` + key + `\s*\)`)
+			hasKeyReplacement := keyRegexp.MatchString(data)
+			data = keyRegexp.ReplaceAllString(data, value)
+			// if the key was found in the data, check if the value contains any replacements
+			if hasKeyReplacement && needsReplacements(value) {
+				// in such case, our replacement contains new replacements and we will need to iterate again
+				replacementsContainReplacements = true
+				recursiveReplacementInfo = fmt.Sprintf("%s => %s", key, value)
+			}
+		}
+		if !replacementsContainReplacements {
+			break // No more replacements needed
+		}
+	}
+	// DEBUG: fmt.Printf("Finished replacements, iteration %d, output: %s\n", i, data)
+	if i == RECURSION_LIMIT && replacementsContainReplacements {
+		return data, fmt.Errorf("templating: recursion limit reached while applying replacements, "+
+			"check for circular references, like: %s", recursiveReplacementInfo)
 	}
 	// find unhandled variables and return an error for the ones not found
 	unhandled := regexp.MustCompile(`\$\(\s*(.*?)\s*\)`)
