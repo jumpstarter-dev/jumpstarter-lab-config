@@ -26,6 +26,105 @@ import (
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/loader"
 )
 
+var lintCmd = &cobra.Command{
+	Use:   "lint [config-file]",
+	Short: "Validate configuration files",
+	Long:  `Lint and validate configuration files to ensure they are valid and follow the expected format.`,
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		vaultPassFile, _ := cmd.Flags().GetString("vault-password-file")
+		// Determine config file path
+		configFilePath := "jumpstarter-lab.yaml" // default
+		if len(args) > 0 {
+			configFilePath = args[0]
+		}
+
+		// Load the configuration file
+		cfg, err := config.LoadConfig(configFilePath)
+		if err != nil {
+			return fmt.Errorf("error loading config file %s: %w", configFilePath, err)
+		}
+
+		fmt.Println("Validating files from:")
+		if len(cfg.Sources.Locations) > 0 {
+			for _, pattern := range cfg.Sources.Locations {
+				fmt.Printf("- %s\n", pattern)
+			}
+		}
+		if len(cfg.Sources.Clients) > 0 {
+			for _, pattern := range cfg.Sources.Clients {
+				fmt.Printf("- %s\n", pattern)
+			}
+		}
+		if len(cfg.Sources.ExporterHosts) > 0 {
+			for _, pattern := range cfg.Sources.ExporterHosts {
+				fmt.Printf("- %s\n", pattern)
+			}
+		}
+		if len(cfg.Sources.Exporters) > 0 {
+			for _, pattern := range cfg.Sources.Exporters {
+				fmt.Printf("- %s\n", pattern)
+			}
+		}
+		if len(cfg.Sources.ExporterTemplates) > 0 {
+			for _, pattern := range cfg.Sources.ExporterTemplates {
+				fmt.Printf("- %s\n", pattern)
+			}
+		}
+		if len(cfg.Sources.JumpstarterInstances) > 0 {
+			for _, pattern := range cfg.Sources.JumpstarterInstances {
+				fmt.Printf("- %s\n", pattern)
+			}
+		}
+		fmt.Println()
+
+		// Initialize the loaded configuration structure
+		loaded, err := loader.LoadAllResources(cfg, vaultPassFile)
+		if err != nil {
+			return fmt.Errorf("validation failed: %w", err)
+		}
+
+		// Validate cross-references between objects
+		errorsByFile := lint(loaded)
+		if len(errorsByFile) > 0 {
+			totalErrors := 0
+			for _, errors := range errorsByFile {
+				totalErrors += len(errors)
+			}
+			fmt.Printf("\n❌ Validation failed with %d error(s):\n\n", totalErrors)
+
+			for filename, errors := range errorsByFile {
+				fmt.Printf("📄 %s:\n", filename)
+				for _, err := range errors {
+					fmt.Printf("\t🔹 %s\n", err)
+				}
+				fmt.Println()
+			}
+			os.Exit(1)
+		}
+
+		keys := loaded.Variables.GetAllKeys()
+		fmt.Printf("📚 Total Variables: %d\n", len(keys))
+		fmt.Println("")
+		fmt.Println("✅ All configurations are valid")
+		return nil
+	},
+}
+
+func init() {
+	// Add the vault password file flag
+	lintCmd.Flags().String("vault-password-file", "", "Path to the vault password file for decrypting variables")
+	// Add the lint command to the root command
+	rootCmd.AddCommand(lintCmd)
+}
+
+func lint(loaded *loader.LoadedLabConfig) map[string][]string {
+	// This function is a placeholder for the linting logic.
+	// Currently, it only validates cross-references between objects.
+	// The actual linting logic can be implemented here as needed.
+	return validateReferences(loaded)
+}
+
 // validateReferences checks that all cross-references between objects are valid
 func validateReferences(loaded *loader.LoadedLabConfig) map[string][]string {
 	errorsByFile := make(map[string][]string)
@@ -97,96 +196,4 @@ func validateReferences(loaded *loader.LoadedLabConfig) map[string][]string {
 	}
 
 	return errorsByFile
-}
-
-var lintCmd = &cobra.Command{
-	Use:   "lint [config-file]",
-	Short: "Validate configuration files",
-	Long:  `Lint and validate configuration files to ensure they are valid and follow the expected format.`,
-	Args:  cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		vaultPassFile, _ := cmd.Flags().GetString("vault-password-file")
-		// Determine config file path
-		configFilePath := "jumpstarter-lab.yaml" // default
-		if len(args) > 0 {
-			configFilePath = args[0]
-		}
-
-		// Load the configuration file
-		cfg, err := config.LoadConfig(configFilePath)
-		if err != nil {
-			return fmt.Errorf("error loading config file %s: %w", configFilePath, err)
-		}
-
-		fmt.Println("Validating files from:")
-		if len(cfg.Sources.Locations) > 0 {
-			for _, pattern := range cfg.Sources.Locations {
-				fmt.Printf("- %s\n", pattern)
-			}
-		}
-		if len(cfg.Sources.Clients) > 0 {
-			for _, pattern := range cfg.Sources.Clients {
-				fmt.Printf("- %s\n", pattern)
-			}
-		}
-		if len(cfg.Sources.ExporterHosts) > 0 {
-			for _, pattern := range cfg.Sources.ExporterHosts {
-				fmt.Printf("- %s\n", pattern)
-			}
-		}
-		if len(cfg.Sources.Exporters) > 0 {
-			for _, pattern := range cfg.Sources.Exporters {
-				fmt.Printf("- %s\n", pattern)
-			}
-		}
-		if len(cfg.Sources.ExporterTemplates) > 0 {
-			for _, pattern := range cfg.Sources.ExporterTemplates {
-				fmt.Printf("- %s\n", pattern)
-			}
-		}
-		if len(cfg.Sources.JumpstarterInstances) > 0 {
-			for _, pattern := range cfg.Sources.JumpstarterInstances {
-				fmt.Printf("- %s\n", pattern)
-			}
-		}
-		fmt.Println()
-
-		// Initialize the loaded configuration structure
-		loaded, err := loader.LoadAllResources(cfg, vaultPassFile)
-		if err != nil {
-			return fmt.Errorf("validation failed: %w", err)
-		}
-
-		// Validate cross-references between objects
-		errorsByFile := validateReferences(loaded)
-		if len(errorsByFile) > 0 {
-			totalErrors := 0
-			for _, errors := range errorsByFile {
-				totalErrors += len(errors)
-			}
-			fmt.Printf("\n❌ Validation failed with %d error(s):\n\n", totalErrors)
-
-			for filename, errors := range errorsByFile {
-				fmt.Printf("📄 %s:\n", filename)
-				for _, err := range errors {
-					fmt.Printf("\t🔹 %s\n", err)
-				}
-				fmt.Println()
-			}
-			os.Exit(1)
-		}
-
-		keys := loaded.Variables.GetAllKeys()
-		fmt.Printf("📚 Total Variables: %d\n", len(keys))
-		fmt.Println("")
-		fmt.Println("✅ All configurations are valid")
-		return nil
-	},
-}
-
-func init() {
-	// Add the vault password file flag
-	lintCmd.Flags().String("vault-password-file", "", "Path to the vault password file for decrypting variables")
-	// Add the lint command to the root command
-	rootCmd.AddCommand(lintCmd)
 }
