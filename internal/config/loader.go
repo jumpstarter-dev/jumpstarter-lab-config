@@ -1,4 +1,4 @@
-package loader
+package config
 
 import (
 	"fmt"
@@ -8,7 +8,6 @@ import (
 
 	jsApi "github.com/jumpstarter-dev/jumpstarter-controller/api/v1alpha1"
 	api "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
-	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/vars"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -69,7 +68,7 @@ func readAndDecodeYAMLFile(filePath string) (runtime.Object, error) {
 // resourceTypeName is used for logging and error messages.
 // cfg contains the base directory to resolve relative paths against.
 // sourceFiles is used to track which file each resource was loaded from.
-func processResourceGlobs(globPatterns []string, targetMap interface{}, resourceTypeName string, cfg *config.Config, sourceFiles map[string]map[string]string) error {
+func processResourceGlobs(globPatterns []string, targetMap interface{}, resourceTypeName string, cfg *Config, sourceFiles map[string]map[string]string) error {
 	if len(globPatterns) == 0 {
 		return nil // Skip if no glob patterns are provided
 	}
@@ -132,7 +131,7 @@ func processResourceGlobs(globPatterns []string, targetMap interface{}, resource
 
 // LoadAllResources processes the configuration sources, loads all specified YAML files,
 // unmarshals them into their respective API types, and returns a LoadedLabConfig struct.
-func LoadAllResources(cfg *config.Config, vaultPassFile string) (*LoadedLabConfig, error) {
+func LoadAllResources(cfg *Config, vaultPassFile string) (*LoadedLabConfig, error) {
 
 	variables, err := vars.NewVariables(vaultPassFile)
 	if err != nil {
@@ -167,6 +166,8 @@ func LoadAllResources(cfg *config.Config, vaultPassFile string) (*LoadedLabConfi
 		{cfg.Sources.JumpstarterInstances, &loaded.JumpstarterInstances, "JumpstarterInstance"},
 	}
 
+	ReportLoading(cfg)
+
 	for _, m := range mappings {
 		if err := processResourceGlobs(m.globPatterns, m.targetMap, m.resourceTypeName, cfg, loaded.SourceFiles); err != nil {
 			return nil, fmt.Errorf("failed to load %s: %w", m.resourceTypeName, err)
@@ -183,4 +184,40 @@ func LoadAllResources(cfg *config.Config, vaultPassFile string) (*LoadedLabConfi
 	}
 
 	return loaded, nil
+}
+
+func ReportLoading(cfg *Config) {
+
+	fmt.Println("Reading files from:")
+	if len(cfg.Sources.Locations) > 0 {
+		for _, pattern := range cfg.Sources.Locations {
+			fmt.Printf("- %s\n", pattern)
+		}
+	}
+	if len(cfg.Sources.Clients) > 0 {
+		for _, pattern := range cfg.Sources.Clients {
+			fmt.Printf("- %s\n", pattern)
+		}
+	}
+	if len(cfg.Sources.ExporterHosts) > 0 {
+		for _, pattern := range cfg.Sources.ExporterHosts {
+			fmt.Printf("- %s\n", pattern)
+		}
+	}
+	if len(cfg.Sources.Exporters) > 0 {
+		for _, pattern := range cfg.Sources.Exporters {
+			fmt.Printf("- %s\n", pattern)
+		}
+	}
+	if len(cfg.Sources.ExporterTemplates) > 0 {
+		for _, pattern := range cfg.Sources.ExporterTemplates {
+			fmt.Printf("- %s\n", pattern)
+		}
+	}
+	if len(cfg.Sources.JumpstarterInstances) > 0 {
+		for _, pattern := range cfg.Sources.JumpstarterInstances {
+			fmt.Printf("- %s\n", pattern)
+		}
+	}
+	fmt.Println()
 }

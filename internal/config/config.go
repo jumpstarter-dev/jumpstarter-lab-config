@@ -9,9 +9,10 @@ import (
 
 // Config represents the structure of the jumpstarter-lab.yaml file.
 type Config struct {
-	Sources   Sources  `yaml:"sources"`
-	Variables []string `yaml:"variables"`
-	BaseDir   string   `yaml:"-"` // Not serialized, set programmatically
+	Sources   Sources          `yaml:"sources"`
+	Variables []string         `yaml:"variables"`
+	BaseDir   string           `yaml:"-"` // Not serialized, set programmatically
+	Loaded    *LoadedLabConfig `yaml:"-"` // Not serialized, used internally
 }
 
 // Sources defines the paths for various configuration files.
@@ -26,7 +27,7 @@ type Sources struct {
 }
 
 // LoadConfig reads a YAML file from the given filePath and unmarshals it into a Config struct.
-func LoadConfig(filePath string) (*Config, error) {
+func LoadConfig(filePath string, vaultPassFile string) (*Config, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
@@ -41,5 +42,7 @@ func LoadConfig(filePath string) (*Config, error) {
 	// Set the base directory containing the config file
 	cfg.BaseDir = filepath.Dir(filePath)
 
-	return &cfg, nil
+	cfg.Loaded, err = LoadAllResources(&cfg, vaultPassFile)
+
+	return &cfg, err
 }

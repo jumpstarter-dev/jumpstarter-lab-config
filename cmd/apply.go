@@ -22,7 +22,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
-	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/loader"
 )
 
 var applyCmd = &cobra.Command{
@@ -42,52 +41,12 @@ var applyCmd = &cobra.Command{
 		}
 
 		// Load the configuration file
-		cfg, err := config.LoadConfig(configFilePath)
+		cfg, err := config.LoadConfig(configFilePath, vaultPassFile)
 		if err != nil {
 			return fmt.Errorf("error loading config file %s: %w", configFilePath, err)
 		}
 
-		fmt.Println("Reading files from:")
-		if len(cfg.Sources.Locations) > 0 {
-			for _, pattern := range cfg.Sources.Locations {
-				fmt.Printf("- %s\n", pattern)
-			}
-		}
-		if len(cfg.Sources.Clients) > 0 {
-			for _, pattern := range cfg.Sources.Clients {
-				fmt.Printf("- %s\n", pattern)
-			}
-		}
-		if len(cfg.Sources.ExporterHosts) > 0 {
-			for _, pattern := range cfg.Sources.ExporterHosts {
-				fmt.Printf("- %s\n", pattern)
-			}
-		}
-		if len(cfg.Sources.Exporters) > 0 {
-			for _, pattern := range cfg.Sources.Exporters {
-				fmt.Printf("- %s\n", pattern)
-			}
-		}
-		if len(cfg.Sources.ExporterTemplates) > 0 {
-			for _, pattern := range cfg.Sources.ExporterTemplates {
-				fmt.Printf("- %s\n", pattern)
-			}
-		}
-		if len(cfg.Sources.JumpstarterInstances) > 0 {
-			for _, pattern := range cfg.Sources.JumpstarterInstances {
-				fmt.Printf("- %s\n", pattern)
-			}
-		}
-		fmt.Println()
-
-		// Initialize the loaded configuration structure
-		_, err = loader.LoadAllResources(cfg, vaultPassFile)
-		if err != nil {
-			return fmt.Errorf("error loading resources: %w", err)
-		}
-
-		fmt.Println("✅ All configurations are valid")
-		fmt.Println()
+		cfg.Validate()
 
 		if dryRun {
 			fmt.Println("Detected changes to apply:")
