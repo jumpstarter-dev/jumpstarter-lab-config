@@ -33,6 +33,26 @@ type ExporterHostSpec struct {
 
 	// Power defines the power control configuration for the exporter host.
 	Power Power `json:"power,omitempty"`
+
+	// Management options for the exporter host, could be SSH access, flightctl device ids, etc..
+	Management Management `json:"management,omitempty"`
+}
+
+type Management struct {
+	SSH SSHCredentials `json:"ssh,omitempty"`
+}
+
+type SSHCredentials struct {
+	// Host is the hostname or IP address for SSH access.
+	Host string `json:"host,omitempty"`
+	// User is the SSH username.
+	User string `json:"user,omitempty"`
+	// KeyFile is the path to the SSH private key file.
+	KeyFile string `json:"keyFile,omitempty"`
+	// Password is the SSH password (if not using key-based auth).
+	Password string `json:"password,omitempty"`
+	// Port is the SSH port (default is 22).
+	Port int `json:"port,omitempty"`
 }
 
 // LocationRef defines the physical location details.

@@ -13,6 +13,11 @@ spec:
   containerImage: "$( vars.ti-exporter-image )"
   addresses:
     - "$( name ).auto.bos2.dc.example.com"
+  management:
+    ssh:
+      host: "$( name ).auto.bos2.dc.example.com"
+      user: "admin"
+      keyFile: "~/.ssh/id_rsa"
   power:
     snmp:
       host: "some-pdu-hostname.auto.eng.bos2.bc.somedomain.com"

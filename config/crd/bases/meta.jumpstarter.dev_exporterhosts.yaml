@@ -63,6 +63,30 @@ spec:
                     description: Tray is the tray identifier within the rack.
                     type: string
                 type: object
+              management:
+                description: Management options for the exporter host, could be SSH
+                  access, flightctl device ids, etc..
+                properties:
+                  ssh:
+                    properties:
+                      host:
+                        description: Host is the hostname or IP address for SSH access.
+                        type: string
+                      keyFile:
+                        description: KeyFile is the path to the SSH private key file.
+                        type: string
+                      password:
+                        description: Password is the SSH password (if not using key-based
+                          auth).
+                        type: string
+                      port:
+                        description: Port is the SSH port (default is 22).
+                        type: integer
+                      user:
+                        description: User is the SSH username.
+                        type: string
+                    type: object
+                type: object
               power:
                 description: Power defines the power control configuration for the
                   exporter host.
