@@ -97,7 +97,7 @@ func TestProcessTemplate_Basic(t *testing.T) {
 		parameters: map[string]string{"place": "Wonderland"},
 	}
 
-	result, err := ProcessTemplate(input, varsMock, params)
+	result, err := ProcessTemplate(input, varsMock, params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestProcessTemplate_MultipleVariablesAndParams(t *testing.T) {
 	input := "Agent $(var.user) (#$(var.id)) on $(param.mission) at $(param.location)"
 	expected := "Agent Charlie (#007) on Secret at HQ"
 
-	result, err := ProcessTemplate(input, varsMock, params)
+	result, err := ProcessTemplate(input, varsMock, params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestProcessTemplate_EmptyParamsAndVars(t *testing.T) {
 	}
 	input := "Nothing to replace here"
 	expected := input
-	result, err := ProcessTemplate(input, varsMock, params)
+	result, err := ProcessTemplate(input, varsMock, params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestProcessTemplate_MissingVariable_Error(t *testing.T) {
 		parameters: map[string]string{},
 	}
 	input := "Hello $(var.missing)"
-	_, err = ProcessTemplate(input, varsMock, params)
+	_, err = ProcessTemplate(input, varsMock, params, nil)
 	if err == nil {
 		t.Errorf("expected error for missing variable, got nil")
 	}
@@ -173,7 +173,7 @@ func TestProcessTemplate_ParameterOnly_NewVars(t *testing.T) {
 	}
 	input := "Param: $(param.foo)"
 	expected := "Param: bar"
-	result, err := ProcessTemplate(input, varsMock, params)
+	result, err := ProcessTemplate(input, varsMock, params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestProcessTemplate_NoReplacements(t *testing.T) {
 	}
 	input := "Nothing to replace here"
 	expected := input
-	result, err := ProcessTemplate(input, varsMock, params)
+	result, err := ProcessTemplate(input, varsMock, params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestProcessTemplate_MissingVariable(t *testing.T) {
 		parameters: map[string]string{},
 	}
 	input := "Hello $(var.missing)"
-	_, err = ProcessTemplate(input, varsMock, params)
+	_, err = ProcessTemplate(input, varsMock, params, nil)
 	if err == nil {
 		t.Errorf("expected error for missing variable, got nil")
 	}
@@ -231,7 +231,7 @@ func TestProcessTemplate_RecursiveReplacements(t *testing.T) {
 
 	input := "Value of a: $(var.a)"
 	expected := "Value of a: 42"
-	result, err := ProcessTemplate(input, varsMock, params)
+	result, err := ProcessTemplate(input, varsMock, params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestProcessTemplate_RecursiveReplacements_Limit(t *testing.T) {
 	input := "Value of a: $(var.a)"
 	expectedRecursionError := "templating: recursion limit reached while applying replacements, "
 	expectedRecursionError += "check for circular references, like: var.a => $(var.a)"
-	_, err = ProcessTemplate(input, varsMock, params)
+	_, err = ProcessTemplate(input, varsMock, params, nil)
 	if err == nil {
 		t.Errorf("expected error for recursive replacement, got nil")
 	} else if err.Error() != expectedRecursionError {
@@ -276,7 +276,7 @@ func TestProcessTemplate_VaultDecryptionError(t *testing.T) {
 	}
 
 	input := "Vault variable: $(var.vault_var)"
-	_, err = ProcessTemplate(input, varsMock, params)
+	_, err = ProcessTemplate(input, varsMock, params, nil)
 	if err == nil || err.Error() != "templating: error retrieving variable 'vault_var': "+
 		"ANSIBLE_VAULT_PASSWORD_FILE or ANSIBLE_VAULT_PASSWORD required for encrypted key vault_var" {
 		t.Errorf("unexpected error message, got %v", err)
@@ -521,5 +521,154 @@ func TestTemplateApplier_NewTemplateApplier_NilLoadedConfig(t *testing.T) {
 	_, err := NewTemplateApplier(cfg, params)
 	if err == nil || err.Error() != "loaded config cannot be nil" {
 		t.Errorf("expected 'loaded config cannot be nil' error, got %v", err)
+	}
+}
+
+func TestProcessTemplate_WithMeta(t *testing.T) {
+	input := "Hello $(var.name), welcome to $(param.place) this is $(someMeta)!"
+	expected := "Hello Alice, welcome to Wonderland this is a meta variable!"
+	varsMock, err := vars.NewVariables("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_ = varsMock.Set("name", "Alice")
+
+	params := &Parameters{
+		parameters: map[string]string{"place": "Wonderland"},
+	}
+
+	meta := &Parameters{
+		parameters: map[string]string{"someMeta": "a meta variable"},
+	}
+
+	result, err := ProcessTemplate(input, varsMock, params, meta)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+
+func TestProcessTemplate_NilMeta(t *testing.T) {
+	input := "Hello $(var.name)"
+	expected := "Hello Bob"
+	varsMock, err := vars.NewVariables("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_ = varsMock.Set("name", "Bob")
+
+	params := &Parameters{
+		parameters: map[string]string{},
+	}
+
+	result, err := ProcessTemplate(input, varsMock, params, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+
+func TestProcessTemplate_MissingMeta(t *testing.T) {
+	input := "Meta: $(meta.missing)"
+	varsMock, err := vars.NewVariables("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	params := &Parameters{
+		parameters: map[string]string{},
+	}
+
+	meta := &Parameters{
+		parameters: map[string]string{},
+	}
+
+	_, err = ProcessTemplate(input, varsMock, params, meta)
+	if err == nil {
+		t.Errorf("expected error for missing meta parameter, got nil")
+	}
+}
+
+func TestTemplateApplier_Apply_WithMeta(t *testing.T) {
+	varsMock, err := vars.NewVariables("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = varsMock.Set("service", "web-server")
+
+	params := NewParameters("test")
+	params.Set("version", "1.0.0")
+
+	cfg := &config.Config{
+		Loaded: &config.LoadedLabConfig{
+			Variables: varsMock,
+		},
+	}
+
+	applier, err := NewTemplateApplier(cfg, params)
+	if err != nil {
+		t.Fatalf("unexpected error creating applier: %v", err)
+	}
+
+	testObj := &TestStruct{
+		Name:        "test",
+		Description: "My name is $(name)",
+		Labels: map[string]string{
+			"service":    "$(var.service)",
+			"version":    "$(param.version)",
+			"env":        "$(name) somewhere",
+			"datacenter": "$(name)'s datacenter",
+		},
+		Tags: []string{"$(var.service)", "$(name)"},
+	}
+
+	err = applier.Apply(testObj)
+	if err != nil {
+		t.Fatalf("unexpected error applying templates: %v", err)
+	}
+
+	expected := &TestStruct{
+		Name:        "test",
+		Description: "My name is test",
+		Labels: map[string]string{
+			"service":    "web-server",
+			"version":    "1.0.0",
+			"env":        "test somewhere",
+			"datacenter": "test's datacenter",
+		},
+		Tags: []string{"web-server", "test"},
+	}
+
+	if testObj.Name != expected.Name {
+		t.Errorf("expected Name %q, got %q", expected.Name, testObj.Name)
+	}
+	if testObj.Description != expected.Description {
+		t.Errorf("expected Description %q, got %q", expected.Description, testObj.Description)
+	}
+	if testObj.Labels["service"] != expected.Labels["service"] {
+		t.Errorf("expected Labels[service] %q, got %q", expected.Labels["service"], testObj.Labels["service"])
+	}
+	if testObj.Labels["version"] != expected.Labels["version"] {
+		t.Errorf("expected Labels[version] %q, got %q", expected.Labels["version"], testObj.Labels["version"])
+	}
+	if testObj.Labels["env"] != expected.Labels["env"] {
+		t.Errorf("expected Labels[env] %q, got %q", expected.Labels["env"], testObj.Labels["env"])
+	}
+	if testObj.Labels["datacenter"] != expected.Labels["datacenter"] {
+		t.Errorf("expected Labels[datacenter] %q, got %q", expected.Labels["datacenter"], testObj.Labels["datacenter"])
+	}
+	if len(testObj.Tags) != len(expected.Tags) {
+		t.Errorf("expected %d tags, got %d", len(expected.Tags), len(testObj.Tags))
+	}
+	for i, tag := range testObj.Tags {
+		if tag != expected.Tags[i] {
+			t.Errorf("expected Tags[%d] %q, got %q", i, expected.Tags[i], tag)
+		}
 	}
 }
