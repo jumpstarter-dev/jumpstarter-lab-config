@@ -11,18 +11,18 @@ and clients in enterprise environments.
 Install the latest version using the install script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mangelajo/jumpstarter-lab-config/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jumpstarter-dev/jumpstarter-lab-config/main/install.sh | bash
 ```
 
 Or install a specific version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mangelajo/jumpstarter-lab-config/main/install.sh | bash -s v0.0.2
+curl -fsSL https://raw.githubusercontent.com/jumpstarter-dev/jumpstarter-lab-config/main/install.sh | bash -s v0.0.2
 ```
 
 ### Manual Installation
 
-1. Download the latest release from the [releases page](https://github.com/mangelajo/jumpstarter-lab-config/releases)
+1. Download the latest release from the [releases page](https://github.com/jumpstarter-dev/jumpstarter-lab-config/releases)
 2. Extract the binary for your platform
 3. Move it to a directory in your PATH (e.g., `~/.local/bin` or `/usr/local/bin`)
 4. Make it executable: `chmod +x jumpstarter-lab-config`
