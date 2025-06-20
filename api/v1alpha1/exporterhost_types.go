@@ -49,6 +49,10 @@ type SSHCredentials struct {
 	User string `json:"user,omitempty"`
 	// KeyFile is the path to the SSH private key file.
 	KeyFile string `json:"keyFile,omitempty"`
+	// SSHKeyData is the SSH private key data as a string.
+	SSHKeyData string `json:"sshKeyData,omitempty"`
+	// SSHKeyPassword is the password for encrypted SSH private keys.
+	SSHKeyPassword string `json:"sshKeyPassword,omitempty"`
 	// Password is the SSH password (if not using key-based auth).
 	Password string `json:"password,omitempty"`
 	// Port is the SSH port (default is 22).

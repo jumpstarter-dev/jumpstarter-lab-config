@@ -82,6 +82,13 @@ spec:
                       port:
                         description: Port is the SSH port (default is 22).
                         type: integer
+                      sshKeyData:
+                        description: SSHKeyData is the SSH private key data as a string.
+                        type: string
+                      sshKeyPassword:
+                        description: SSHKeyPassword is the password for encrypted
+                          SSH private keys.
+                        type: string
                       user:
                         description: User is the SSH username.
                         type: string

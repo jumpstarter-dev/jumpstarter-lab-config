@@ -88,9 +88,34 @@ func (m *SSHHostManager) createSshClient() (*ssh.Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to read SSH key file: %w", err)
 		}
-		signer, err := ssh.ParsePrivateKey(key)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse SSH private key: %w", err)
+		var signer ssh.Signer
+		if m.ExporterHost.Spec.Management.SSH.SSHKeyPassword != "" {
+			signer, err = ssh.ParsePrivateKeyWithPassphrase(key, []byte(m.ExporterHost.Spec.Management.SSH.SSHKeyPassword))
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse encrypted SSH private key from file: %w", err)
+			}
+		} else {
+			signer, err = ssh.ParsePrivateKey(key)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse SSH private key from file: %w", err)
+			}
+		}
+		auth = append(auth, ssh.PublicKeys(signer))
+	}
+
+	if m.ExporterHost.Spec.Management.SSH.SSHKeyData != "" {
+		var signer ssh.Signer
+		var err error
+		if m.ExporterHost.Spec.Management.SSH.SSHKeyPassword != "" {
+			signer, err = ssh.ParsePrivateKeyWithPassphrase([]byte(m.ExporterHost.Spec.Management.SSH.SSHKeyData), []byte(m.ExporterHost.Spec.Management.SSH.SSHKeyPassword))
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse encrypted SSH private key from sshKeyData: %w", err)
+			}
+		} else {
+			signer, err = ssh.ParsePrivateKey([]byte(m.ExporterHost.Spec.Management.SSH.SSHKeyData))
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse SSH private key from sshKeyData: %w", err)
+			}
 		}
 		auth = append(auth, ssh.PublicKeys(signer))
 	}
@@ -102,19 +127,18 @@ func (m *SSHHostManager) createSshClient() (*ssh.Client, error) {
 	// Check if SSH agent is running and use it if available
 	agentSocket := os.Getenv("SSH_AUTH_SOCK")
 	if agentSocket != "" {
-		log.Fatal("SSH_AUTH_SOCK environment variable not set. Is ssh-agent running?")
-
 		// Connect to the agent's socket.
 		conn, err := net.Dial("unix", agentSocket)
 		if err != nil {
-			log.Fatalf("Failed to open SSH_AUTH_SOCK: %v", err)
+			log.Printf("Failed to connect to SSH agent: %v", err)
+		} else {
+			defer conn.Close() // nolint:errcheck
+
+			// Create a new agent client.
+			agentClient := agent.NewClient(conn)
+
+			auth = append(auth, ssh.PublicKeysCallback(agentClient.Signers))
 		}
-		defer conn.Close() // nolint:errcheck
-
-		// Create a new agent client.
-		agentClient := agent.NewClient(conn)
-
-		auth = append(auth, ssh.PublicKeysCallback(agentClient.Signers))
 	}
 
 	config := &ssh.ClientConfig{

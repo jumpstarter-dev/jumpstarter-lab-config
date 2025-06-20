@@ -17,7 +17,7 @@ spec:
     ssh:
       host: "$( name ).auto.bos2.dc.example.com"
       user: "admin"
-      keyFile: "~/.ssh/id_rsa"
+      sshKey: "$( vars.exporter-ssh-key )"
   power:
     snmp:
       host: "some-pdu-hostname.auto.eng.bos2.bc.somedomain.com"
