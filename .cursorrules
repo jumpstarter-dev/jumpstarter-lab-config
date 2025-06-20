@@ -1,0 +1,44 @@
+# Cursor Rules for Jumpstarter Lab Config
+
+## Required Workflow for Every Iteration
+
+### End-of-Iteration Checklist
+At the end of **every** coding iteration, you MUST:
+
+1. **Run linting**: Execute `make lint`
+   - This runs golangci-lint to check for code quality issues
+   - Fix ALL linting errors before proceeding
+   - If needed, use `make lint-fix` to automatically fix some issues
+   - Repeat linting after `make lint-fix` to fix any remaining issues
+
+2. **Run tests**: Execute `make test`
+   - This runs the full test suite with coverage
+   - ALL tests must pass before considering the iteration complete
+   - Fix any failing tests immediately
+
+### Error Handling
+- **Linting errors**: Must be resolved before code can be considered complete
+- **Test failures**: Must be investigated and fixed - no exceptions
+- **Build errors**: Run `make build` to ensure the binary compiles successfully
+
+### Additional Quality Checks
+Before finalizing any changes, also ensure:
+- Code formatting: `make fmt` (automatically runs go fmt)
+- Generated code is up-to-date: `make generate` and `make manifests`
+
+### Development Flow
+1. Make your code changes
+2. Run `make fmt` to format code
+3. Run `make lint` and fix any issues
+4. Run `make test` and ensure all tests pass
+5. Run `make build` to verify compilation
+6. Only then consider the iteration complete
+
+### Important Notes
+- This is a Kubernetes controller project using kubebuilder
+- Generated files (like `zz_generated.deepcopy.go`) should not be manually edited
+- Always run `make generate` and `make manifests` when modifying API types
+- The project uses golangci-lint v2.1.0 with configuration in `.golangci.yml`
+
+### No Exceptions
+These rules apply to ALL code changes, regardless of size or scope. Every commit should pass both linting and testing before being considered ready.
