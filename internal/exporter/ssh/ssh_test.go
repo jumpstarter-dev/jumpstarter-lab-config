@@ -322,9 +322,6 @@ func TestSSHHostManagerInterface(t *testing.T) {
 	}
 
 	manager = sshManager
-	if manager == nil {
-		t.Error("SSHHostManager should implement HostManager interface")
-	}
 
 	// Test interface methods are available
 	_, err := manager.Status()
