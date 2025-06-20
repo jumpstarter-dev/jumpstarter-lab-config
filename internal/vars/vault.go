@@ -42,6 +42,11 @@ type VaultDecryptor struct {
 
 // NewVaultDecryptor creates a new vault decryptor with the given password
 func NewVaultDecryptor(password string) *VaultDecryptor {
+	// trim the password left and right of whitespace, line breaks and tabs
+	password = strings.TrimSpace(password)
+	password = strings.ReplaceAll(password, "\n", "")
+	password = strings.ReplaceAll(password, "\r", "")
+	password = strings.ReplaceAll(password, "\t", "")
 	return &VaultDecryptor{password: password}
 }
 
@@ -70,7 +75,6 @@ func (vd *VaultDecryptor) Decrypt(vaultData string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
 	// Generate keys
 	key := generateCipherKey(vd.password, salt)
 

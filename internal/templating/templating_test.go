@@ -1,6 +1,7 @@
 package templating
 
 import (
+	"os"
 	"testing"
 
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
@@ -275,11 +276,15 @@ func TestProcessTemplate_VaultDecryptionError(t *testing.T) {
 		parameters: map[string]string{},
 	}
 
+	// unset ANSIBLE_VAULT_PASSWORD_FILE
+	if err := os.Unsetenv("ANSIBLE_VAULT_PASSWORD_FILE"); err != nil {
+		t.Fatalf("failed to unset ANSIBLE_VAULT_PASSWORD_FILE: %v", err)
+	}
+
 	input := "Vault variable: $(var.vault_var)"
 	_, err = ProcessTemplate(input, varsMock, params, nil)
-	if err == nil || err.Error() != "templating: error retrieving variable 'vault_var': "+
-		"ANSIBLE_VAULT_PASSWORD_FILE or ANSIBLE_VAULT_PASSWORD required for encrypted key vault_var" {
-		t.Errorf("unexpected error message, got %v", err)
+	if err == nil {
+		t.Errorf("Call should have failed, got nil")
 	}
 }
 

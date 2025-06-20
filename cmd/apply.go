@@ -22,6 +22,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
+	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/exporter/ssh"
+	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/templating"
 )
 
 var applyCmd = &cobra.Command{
@@ -47,12 +49,30 @@ var applyCmd = &cobra.Command{
 		}
 
 		cfg.Validate()
+		tapplier, err := templating.NewTemplateApplier(cfg, nil)
+		if err != nil {
+			return fmt.Errorf("error creating template applier %w", err)
+		}
 
 		if dryRun {
-			fmt.Println("Detected changes to apply:")
-			fmt.Println()
-			// TODO: Implement dry-run logic to detect changes
-			fmt.Println("⚠️ Dry-run mode: no changes will be applied")
+			for _, host := range cfg.Loaded.ExporterHosts {
+				hostCopy := host.DeepCopy()
+				err = tapplier.Apply(hostCopy)
+				if err != nil {
+					return fmt.Errorf("error applying template for %s: %w", host.Name, err)
+				}
+				fmt.Printf("Exporter host: %s\n", hostCopy.Name)
+				hostSsh, err := ssh.NewSSHHostManager(hostCopy)
+				if err != nil {
+					return fmt.Errorf("error creating SSH host manager for %s: %w", host.Name, err)
+				}
+				status, err := hostSsh.Status()
+				if err != nil {
+					return fmt.Errorf("error getting status for %s: %w", host.Name, err)
+				}
+				fmt.Printf("Status: %s\n", status)
+			}
+
 		} else {
 			fmt.Println("Applying changes:")
 			fmt.Println()

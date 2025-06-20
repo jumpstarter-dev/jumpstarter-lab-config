@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -19,6 +20,13 @@ type HostManager interface {
 	NeedsUpdate() (bool, error)
 	Diff() (string, error)
 	Apply() error
+}
+
+// CommandResult represents the result of running a command via SSH
+type CommandResult struct {
+	Stdout   string
+	Stderr   string
+	ExitCode int
 }
 
 type SSHHostManager struct {
@@ -54,10 +62,88 @@ func NewSSHHostManager(exporterHost *v1alpha1.ExporterHost) (HostManager, error)
 }
 
 func (m *SSHHostManager) Status() (string, error) {
-	if m.ExporterHost.Spec.Management.SSH.Host == "" {
-		return "", fmt.Errorf("SSH host is not configured for exporter %s", m.ExporterHost.Name)
+	result, err := m.runCommand("ls -la")
+	if err != nil {
+		return "", fmt.Errorf("failed to run status command for %q: %w", m.ExporterHost.Name, err)
 	}
-	return "Not implemented yet", nil
+
+	// For now, return a simple status based on exit code
+	if result.ExitCode == 0 {
+		return "ok", nil
+	}
+	return fmt.Sprintf("error (exit code: %d)", result.ExitCode), nil
+}
+
+// runCommand executes a command on the remote host and returns the result
+func (m *SSHHostManager) runCommand(command string) (*CommandResult, error) {
+	if m.sshClient == nil {
+		return nil, fmt.Errorf("sshClient is not initialized")
+	}
+	session, err := m.sshClient.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SSH session for %q: %w", m.ExporterHost.Name, err)
+	}
+	defer func() {
+		if closeErr := session.Close(); closeErr != nil {
+			log.Printf("Failed to close SSH session for %q: %v", m.ExporterHost.Name, closeErr)
+		}
+	}()
+
+	stdout, err := session.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdout pipe for %q: %w", m.ExporterHost.Name, err)
+	}
+
+	stderr, err := session.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stderr pipe for %q: %w", m.ExporterHost.Name, err)
+	}
+
+	// Capture stdout and stderr
+	var stdoutBytes, stderrBytes []byte
+	var stdoutErr, stderrErr error
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		stdoutBytes, stdoutErr = io.ReadAll(stdout)
+	}()
+	go func() {
+		defer wg.Done()
+		stderrBytes, stderrErr = io.ReadAll(stderr)
+	}()
+
+	// Run the command
+	err = session.Run(command)
+
+	// Wait for stdout and stderr to be read
+	wg.Wait()
+
+	// Check for errors in reading stdout/stderr
+	if stdoutErr != nil {
+		return nil, fmt.Errorf("failed to read stdout for %q: %w", m.ExporterHost.Name, stdoutErr)
+	}
+	if stderrErr != nil {
+		return nil, fmt.Errorf("failed to read stderr for %q: %w", m.ExporterHost.Name, stderrErr)
+	}
+
+	// Get exit code
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*ssh.ExitError); ok {
+			exitCode = exitErr.ExitStatus()
+		} else {
+			// If it's not an exit error, return the error
+			return nil, fmt.Errorf("failed to run command for %q: %w", m.ExporterHost.Name, err)
+		}
+	}
+
+	return &CommandResult{
+		Stdout:   string(stdoutBytes),
+		Stderr:   string(stderrBytes),
+		ExitCode: exitCode,
+	}, nil
 }
 
 func (m *SSHHostManager) NeedsUpdate() (bool, error) {

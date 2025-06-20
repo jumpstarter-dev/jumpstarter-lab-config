@@ -41,9 +41,10 @@ func constructReplacementMap(variables *vars.Variables, parameters *Parameters, 
 		replacements["var."+key] = value
 	}
 
-	// Add parameters to the replacement map
-	for key, value := range parameters.parameters {
-		replacements["param."+key] = value
+	if parameters != nil { // Add parameters to the replacement map
+		for key, value := range parameters.parameters {
+			replacements["param."+key] = value
+		}
 	}
 
 	// Add meta parameters to the replacement map

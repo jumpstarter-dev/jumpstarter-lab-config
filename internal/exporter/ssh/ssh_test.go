@@ -325,7 +325,7 @@ func TestSSHHostManagerInterface(t *testing.T) {
 
 	// Test interface methods are available
 	_, err := manager.Status()
-	if err != nil && !strings.Contains(err.Error(), "SSH host is not configured") {
+	if err != nil && !strings.Contains(err.Error(), "SSH host is not configured") && !strings.Contains(err.Error(), "sshClient is not initialized") {
 		// We expect either success or the specific SSH host error
 		t.Errorf("Unexpected error from Status method: %v", err)
 	}
