@@ -30,6 +30,11 @@ type JumpstarterInstanceSpec struct {
 	// +kubebuilder:validation:Optional
 	KubeContext string `json:"kube-context,omitempty"`
 
+	// Kubeconfig specifies the kubeconfig to use for communicating with
+	// the cluster where the Jumpstarter controller is running or targeting.
+	// +kubebuilder:validation:Optional
+	Kubeconfig string `json:"kubeconfig,omitempty"`
+
 	// Endpoints lists the gRPC endpoints for the Jumpstarter instance.
 	// These are the addresses that clients will use to connect to the Jumpstarter services.
 	// +kubebuilder:validation:Optional

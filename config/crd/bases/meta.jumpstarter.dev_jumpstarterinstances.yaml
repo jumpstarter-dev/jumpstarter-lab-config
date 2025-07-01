@@ -52,6 +52,11 @@ spec:
                   KubeContext specifies the kubeconfig context to use for communicating with
                   the cluster where the Jumpstarter controller is running or targeting.
                 type: string
+              kubeconfig:
+                description: |-
+                  Kubeconfig specifies the kubeconfig to use for communicating with
+                  the cluster where the Jumpstarter controller is running or targeting.
+                type: string
               namespace:
                 description: |-
                   Namespace specifies the Kubernetes namespace relevant to this JumpstarterInstance.

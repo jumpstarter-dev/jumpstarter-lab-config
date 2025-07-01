@@ -17,12 +17,16 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/jumpstarter-dev/jumpstarter-controller/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/exporter/ssh"
+	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/instance"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/templating"
 )
 
@@ -71,6 +75,26 @@ var applyCmd = &cobra.Command{
 					return fmt.Errorf("error getting status for %s: %w", host.Name, err)
 				}
 				fmt.Printf("Status: %s\n", status)
+			}
+
+			for _, inst := range cfg.Loaded.JumpstarterInstances {
+				instanceCopy := inst.DeepCopy()
+				err = tapplier.Apply(instanceCopy)
+				if err != nil {
+					return fmt.Errorf("error applying template for %s: %w", inst.Name, err)
+				}
+				kubeClient, err := instance.NewKubeClientFromInstance(instanceCopy, instanceCopy.Spec.Kubeconfig)
+				if err != nil {
+					return fmt.Errorf("error creating instance client for %s: %w", inst.Name, err)
+				}
+
+				// list all exporters in the instance
+				exporters := &v1alpha1.ExporterList{}
+				err = kubeClient.List(context.Background(), exporters, client.InNamespace(instanceCopy.Spec.Namespace))
+				if err != nil {
+					return fmt.Errorf("error listing exporters for %s: %w", inst.Name, err)
+				}
+				fmt.Printf("Exporters: %v\n", exporters)
 			}
 
 		} else {
