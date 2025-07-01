@@ -21,9 +21,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/jumpstarter-dev/jumpstarter-controller/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/exporter/ssh"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/instance"
@@ -83,18 +81,21 @@ var applyCmd = &cobra.Command{
 				if err != nil {
 					return fmt.Errorf("error applying template for %s: %w", inst.Name, err)
 				}
-				kubeClient, err := instance.NewKubeClientFromInstance(instanceCopy, instanceCopy.Spec.Kubeconfig)
+				instanceClient, err := instance.NewInstance(instanceCopy, instanceCopy.Spec.Kubeconfig)
 				if err != nil {
-					return fmt.Errorf("error creating instance client for %s: %w", inst.Name, err)
+					return fmt.Errorf("error creating instance for %s: %w", inst.Name, err)
 				}
 
 				// list all exporters in the instance
-				exporters := &v1alpha1.ExporterList{}
-				err = kubeClient.List(context.Background(), exporters, client.InNamespace(instanceCopy.Spec.Namespace))
+				exporters, err := instanceClient.ListExporters(context.Background())
 				if err != nil {
 					return fmt.Errorf("error listing exporters for %s: %w", inst.Name, err)
 				}
-				fmt.Printf("Exporters: %v\n", exporters)
+				for _, exporter := range exporters.Items {
+					fmt.Println("--------------------------------")
+					fmt.Printf("Exporter: %+v\n", exporter)
+					fmt.Println("--------------------------------")
+				}
 			}
 
 		} else {
