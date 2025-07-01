@@ -7,7 +7,7 @@ GOBIN=$(shell go env GOPATH)/bin
 else
 GOBIN=$(shell go env GOBIN)
 endif
-
+LOCALBIN ?= ~/.local/bin
 # CONTAINER_TOOL defines the container tool to be used for building images.
 # Be aware that the target commands are only tested with Docker which is
 # scaffolded by default. However, you might want to replace it to use other
@@ -74,6 +74,13 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/jumpstarter-lab-config cmd/*
+
+.PHONY: install
+install: build ## Build and install jumpstarter-lab-config binary to LOCALBIN.
+	@echo "Installing jumpstarter-lab-config to $(LOCALBIN)"
+	@mkdir -p $(LOCALBIN)
+	@cp bin/jumpstarter-lab-config $(LOCALBIN)/jumpstarter-lab-config
+	@echo "Installed jumpstarter-lab-config to $(LOCALBIN)/jumpstarter-lab-config"
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
