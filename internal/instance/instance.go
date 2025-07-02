@@ -260,6 +260,8 @@ func (i *Instance) createClient(ctx context.Context, clientObj *v1alpha1.Client)
 	if i.dryRun {
 		fmt.Printf("➕ [%s] dry run: Would create client %s in namespace %s\n", i.config.Name, clientObj.Name, clientObj.Namespace)
 		return nil
+	} else {
+		fmt.Printf("➕ [%s] Creating client %s in namespace %s\n", i.config.Name, clientObj.Name, clientObj.Namespace)
 	}
 
 	return i.client.Create(ctx, clientObj)
