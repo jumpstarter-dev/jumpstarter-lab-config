@@ -158,11 +158,11 @@ func TestInstanceExporterMethods(t *testing.T) {
 		}
 	})
 
-	t.Run("getExporter", func(t *testing.T) {
+	t.Run("GetExporterByName", func(t *testing.T) {
 		inst, err := NewInstance(instance, validKubeconfig, false, false)
 		if err == nil {
 			ctx := context.Background()
-			exporter, err := inst.getExporter(ctx, "test-exporter")
+			exporter, err := inst.GetExporterByName(ctx, "test-exporter")
 			// This will likely fail due to connection issues or missing exporter
 			if err != nil {
 				assert.True(t,
@@ -180,7 +180,7 @@ func TestInstanceExporterMethods(t *testing.T) {
 		}
 	})
 
-	t.Run("getExporter without namespace", func(t *testing.T) {
+	t.Run("GetExporterByName without namespace", func(t *testing.T) {
 		instanceNoNamespace := &v1alphaConfig.JumpstarterInstance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-instance-no-namespace",
@@ -194,7 +194,7 @@ func TestInstanceExporterMethods(t *testing.T) {
 		inst, err := NewInstance(instanceNoNamespace, validKubeconfig, false, false)
 		if err == nil {
 			ctx := context.Background()
-			_, err := inst.getExporter(ctx, "test-exporter")
+			_, err := inst.GetExporterByName(ctx, "test-exporter")
 			// This should fail because namespace is required
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "namespace is required")

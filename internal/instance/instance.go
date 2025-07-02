@@ -120,6 +120,11 @@ func (i *Instance) GetClientByName(ctx context.Context, name string) (*v1alpha1.
 	return i.getClientByName(ctx, name)
 }
 
+// GetExporterByName retrieves a specific exporter by name
+func (i *Instance) GetExporterByName(ctx context.Context, name string) (*v1alpha1.Exporter, error) {
+	return i.getExporterByName(ctx, name)
+}
+
 func (i *Instance) prepareMetadata(metadata *metav1.ObjectMeta, newAnnotations map[string]string) {
 
 	// Initialize annotations if nil

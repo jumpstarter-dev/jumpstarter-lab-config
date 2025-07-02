@@ -76,10 +76,13 @@ var applyCmd = &cobra.Command{
 			}
 
 			err = instanceClient.SyncClients(context.Background(), cfg)
-			// list all exporters in the instance
-
 			if err != nil {
 				return fmt.Errorf("error syncing clients for %s: %w", inst.Name, err)
+			}
+
+			err = instanceClient.SyncExporters(context.Background(), cfg)
+			if err != nil {
+				return fmt.Errorf("error syncing exporters for %s: %w", inst.Name, err)
 			}
 		}
 
