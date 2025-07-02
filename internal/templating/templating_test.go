@@ -8,6 +8,13 @@ import (
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/vars"
 )
 
+// Test constants to avoid goconst linting issues
+const (
+	testContext2 = "context2"
+	testValue1   = "value1"
+	testValue2   = "value2"
+)
+
 func TestApplyReplacements_Simple(t *testing.T) {
 	data := "Hello $(var.name), welcome to $(param.place)!"
 	replacements := map[string]string{
@@ -675,5 +682,252 @@ func TestTemplateApplier_Apply_WithMeta(t *testing.T) {
 		if tag != expected.Tags[i] {
 			t.Errorf("expected Tags[%d] %q, got %q", i, expected.Tags[i], tag)
 		}
+	}
+}
+
+func TestParameters_Merge_BothNonNil(t *testing.T) {
+	p1 := NewParameters("context1")
+	p1.Set("key1", testValue1)
+	p1.Set("shared", "original")
+
+	p2 := NewParameters(testContext2)
+	p2.Set("key2", testValue2)
+	p2.Set("shared", "overwritten")
+
+	result := p1.Merge(p2)
+
+	// Verify context is merged with both contexts
+	expectedContext := "merged-context1-" + testContext2
+	if result.context != expectedContext {
+		t.Errorf("expected context '%s', got '%s'", expectedContext, result.context)
+	}
+
+	// Verify all parameters are present
+	if value, exists := result.Get("key1"); !exists || value != testValue1 {
+		t.Errorf("expected key1='%s', got exists=%v, value='%s'", testValue1, exists, value)
+	}
+
+	if value, exists := result.Get("key2"); !exists || value != testValue2 {
+		t.Errorf("expected key2='%s', got exists=%v, value='%s'", testValue2, exists, value)
+	}
+
+	// Verify overwriting behavior
+	if value, exists := result.Get("shared"); !exists || value != "overwritten" {
+		t.Errorf("expected shared='overwritten', got exists=%v, value='%s'", exists, value)
+	}
+}
+
+func TestParameters_Merge_ReceiverNil(t *testing.T) {
+	var p1 *Parameters = nil
+
+	p2 := NewParameters(testContext2)
+	p2.Set("key2", testValue2)
+	p2.Set("key3", "value3")
+
+	result := p1.Merge(p2)
+
+	// Verify context is merged with only the second parameter
+	expectedContext := "merged-" + testContext2
+	if result.context != expectedContext {
+		t.Errorf("expected context '%s', got '%s'", expectedContext, result.context)
+	}
+
+	// Verify only p2's parameters are present
+	if value, exists := result.Get("key2"); !exists || value != testValue2 {
+		t.Errorf("expected key2='%s', got exists=%v, value='%s'", testValue2, exists, value)
+	}
+
+	if value, exists := result.Get("key3"); !exists || value != "value3" {
+		t.Errorf("expected key3='value3', got exists=%v, value='%s'", exists, value)
+	}
+}
+
+func TestParameters_Merge_NoOverlap(t *testing.T) {
+	p1 := NewParameters("context1")
+	p1.Set("key1", testValue1)
+	p1.Set("key2", testValue2)
+
+	p2 := NewParameters(testContext2)
+	p2.Set("key3", "value3")
+	p2.Set("key4", "value4")
+
+	result := p1.Merge(p2)
+
+	// Verify context is merged with both contexts
+	expectedContext := "merged-context1-" + testContext2
+	if result.context != expectedContext {
+		t.Errorf("expected context '%s', got '%s'", expectedContext, result.context)
+	}
+
+	// Verify all parameters are present
+	expectedKeys := map[string]string{
+		"key1": testValue1,
+		"key2": testValue2,
+		"key3": "value3",
+		"key4": "value4",
+	}
+
+	for key, expectedValue := range expectedKeys {
+		if value, exists := result.Get(key); !exists || value != expectedValue {
+			t.Errorf("expected %s='%s', got exists=%v, value='%s'", key, expectedValue, exists, value)
+		}
+	}
+}
+
+func TestParameters_Merge_EmptyParameters(t *testing.T) {
+	p1 := NewParameters("context1")
+	p2 := NewParameters(testContext2)
+
+	result := p1.Merge(p2)
+
+	// Verify context is merged with both contexts
+	expectedContext := "merged-context1-" + testContext2
+	if result.context != expectedContext {
+		t.Errorf("expected context '%s', got '%s'", expectedContext, result.context)
+	}
+
+	// Verify no parameters exist
+	if len(result.parameters) != 0 {
+		t.Errorf("expected empty parameters, got %d parameters", len(result.parameters))
+	}
+}
+
+func TestParameters_Merge_FirstEmpty(t *testing.T) {
+	p1 := NewParameters("context1")
+
+	p2 := NewParameters(testContext2)
+	p2.Set("key1", testValue1)
+	p2.Set("key2", testValue2)
+
+	result := p1.Merge(p2)
+
+	// Verify context is merged with both contexts
+	expectedContext := "merged-context1-" + testContext2
+	if result.context != expectedContext {
+		t.Errorf("expected context '%s', got '%s'", expectedContext, result.context)
+	}
+
+	// Verify only p2's parameters are present
+	if value, exists := result.Get("key1"); !exists || value != testValue1 {
+		t.Errorf("expected key1='%s', got exists=%v, value='%s'", testValue1, exists, value)
+	}
+
+	if value, exists := result.Get("key2"); !exists || value != testValue2 {
+		t.Errorf("expected key2='%s', got exists=%v, value='%s'", testValue2, exists, value)
+	}
+}
+
+func TestParameters_Merge_SecondEmpty(t *testing.T) {
+	p1 := NewParameters("context1")
+	p1.Set("key1", testValue1)
+	p1.Set("key2", testValue2)
+
+	p2 := NewParameters(testContext2)
+
+	result := p1.Merge(p2)
+
+	// Verify context is merged with both contexts
+	expectedContext := "merged-context1-" + testContext2
+	if result.context != expectedContext {
+		t.Errorf("expected context '%s', got '%s'", expectedContext, result.context)
+	}
+
+	// Verify only p1's parameters are present
+	if value, exists := result.Get("key1"); !exists || value != testValue1 {
+		t.Errorf("expected key1='%s', got exists=%v, value='%s'", testValue1, exists, value)
+	}
+
+	if value, exists := result.Get("key2"); !exists || value != testValue2 {
+		t.Errorf("expected key2='%s', got exists=%v, value='%s'", testValue2, exists, value)
+	}
+}
+
+func TestParameters_Merge_ComplexOverwrite(t *testing.T) {
+	p1 := NewParameters("context1")
+	p1.SetFromMap(map[string]string{
+		"env":     "development",
+		"version": "1.0.0",
+		"debug":   "true",
+		"unique1": testValue1,
+	})
+
+	p2 := NewParameters(testContext2)
+	p2.SetFromMap(map[string]string{
+		"env":     "production",
+		"version": "2.0.0",
+		"timeout": "30s",
+		"unique2": testValue2,
+	})
+
+	result := p1.Merge(p2)
+
+	// Verify context is merged with both contexts
+	expectedContext := "merged-context1-" + testContext2
+	if result.context != expectedContext {
+		t.Errorf("expected context '%s', got '%s'", expectedContext, result.context)
+	}
+
+	// Verify overwritten values
+	if value, exists := result.Get("env"); !exists || value != "production" {
+		t.Errorf("expected env='production', got exists=%v, value='%s'", exists, value)
+	}
+
+	if value, exists := result.Get("version"); !exists || value != "2.0.0" {
+		t.Errorf("expected version='2.0.0', got exists=%v, value='%s'", exists, value)
+	}
+
+	// Verify preserved values from p1
+	if value, exists := result.Get("debug"); !exists || value != "true" {
+		t.Errorf("expected debug='true', got exists=%v, value='%s'", exists, value)
+	}
+
+	if value, exists := result.Get("unique1"); !exists || value != testValue1 {
+		t.Errorf("expected unique1='%s', got exists=%v, value='%s'", testValue1, exists, value)
+	}
+
+	// Verify new values from p2
+	if value, exists := result.Get("timeout"); !exists || value != "30s" {
+		t.Errorf("expected timeout='30s', got exists=%v, value='%s'", exists, value)
+	}
+
+	if value, exists := result.Get("unique2"); !exists || value != testValue2 {
+		t.Errorf("expected unique2='%s', got exists=%v, value='%s'", testValue2, exists, value)
+	}
+}
+
+func TestParameters_Merge_SecondParameterNil(t *testing.T) {
+	p1 := NewParameters("context1")
+	p1.Set("key1", testValue1)
+	p1.Set("key2", testValue2)
+
+	var p2 *Parameters = nil
+
+	result := p1.Merge(p2)
+
+	// Verify context is merged with only the first parameter
+	expectedContext := "merged-context1"
+	if result.context != expectedContext {
+		t.Errorf("expected context '%s', got '%s'", expectedContext, result.context)
+	}
+
+	// Verify only p1's parameters are present
+	if value, exists := result.Get("key1"); !exists || value != testValue1 {
+		t.Errorf("expected key1='%s', got exists=%v, value='%s'", testValue1, exists, value)
+	}
+
+	if value, exists := result.Get("key2"); !exists || value != testValue2 {
+		t.Errorf("expected key2='%s', got exists=%v, value='%s'", testValue2, exists, value)
+	}
+}
+
+func TestParameters_Merge_BothParametersNil(t *testing.T) {
+	var p1 *Parameters = nil
+	var p2 *Parameters = nil
+
+	result := p1.Merge(p2)
+
+	// Verify that nil is returned when both parameters are nil
+	if result != nil {
+		t.Errorf("expected nil result when both parameters are nil, got %v", result)
 	}
 }

@@ -89,8 +89,8 @@ func (i *Instance) deleteExporter(ctx context.Context, name string) error {
 		return fmt.Errorf("failed to get exporter %s: %w", name, err)
 	}
 
-	if i.dryRun {
-		fmt.Printf("🗑️ [%s] dry run: Would delete exporter %s in namespace %s\n", i.config.Name, name, namespace)
+	if i.dryRun || i.prune {
+		fmt.Printf("🗑️ [%s] dry run / don't prune: Would delete exporter %s in namespace %s\n", i.config.Name, name, namespace)
 		return nil
 	}
 

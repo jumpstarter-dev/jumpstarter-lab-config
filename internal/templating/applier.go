@@ -30,7 +30,12 @@ func NewTemplateApplier(cfg *config.Config, parameters *Parameters) (*TemplateAp
 // and applies ProcessTemplate to every string field.
 func (t *TemplateApplier) Apply(obj interface{}) error {
 	meta := createMetadataParameters(obj)
-	return t.applyTemplates(reflect.ValueOf(obj), meta)
+	return t.applyTemplates(reflect.ValueOf(obj), meta, nil)
+}
+
+func (t *TemplateApplier) ApplyWithParameters(obj interface{}, customParameters *Parameters) error {
+	meta := createMetadataParameters(obj)
+	return t.applyTemplates(reflect.ValueOf(obj), meta, customParameters)
 }
 
 func createMetadataParameters(obj interface{}) *Parameters {
@@ -79,7 +84,7 @@ func createMetadataParameters(obj interface{}) *Parameters {
 	return meta
 }
 
-func (t *TemplateApplier) applyTemplates(v reflect.Value, meta *Parameters) error {
+func (t *TemplateApplier) applyTemplates(v reflect.Value, meta *Parameters, customParameters *Parameters) error {
 	if !v.IsValid() {
 		return nil
 	}
@@ -89,25 +94,25 @@ func (t *TemplateApplier) applyTemplates(v reflect.Value, meta *Parameters) erro
 		if v.IsNil() {
 			return nil
 		}
-		return t.applyTemplates(v.Elem(), meta)
+		return t.applyTemplates(v.Elem(), meta, customParameters)
 	case reflect.Interface:
 		if v.IsNil() {
 			return nil
 		}
-		return t.applyTemplates(v.Elem(), meta)
+		return t.applyTemplates(v.Elem(), meta, customParameters)
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
 			// Only process exported fields
 			if v.Type().Field(i).PkgPath != "" {
 				continue
 			}
-			if err := t.applyTemplates(v.Field(i), meta); err != nil {
+			if err := t.applyTemplates(v.Field(i), meta, customParameters); err != nil {
 				return err
 			}
 		}
 	case reflect.Slice, reflect.Array:
 		for i := 0; i < v.Len(); i++ {
-			if err := t.applyTemplates(v.Index(i), meta); err != nil {
+			if err := t.applyTemplates(v.Index(i), meta, customParameters); err != nil {
 				return err
 			}
 		}
@@ -116,14 +121,14 @@ func (t *TemplateApplier) applyTemplates(v reflect.Value, meta *Parameters) erro
 			val := v.MapIndex(key)
 			// For map[string]string, apply directly
 			if val.Kind() == reflect.String {
-				str, err := ProcessTemplate(val.String(), t.variables, t.parameters, meta)
+				str, err := ProcessTemplate(val.String(), t.variables, t.parameters.Merge(customParameters), meta)
 				if err != nil {
 					return fmt.Errorf("template error for map key %v: %w", key, err)
 				}
 				v.SetMapIndex(key, reflect.ValueOf(str))
 			} else {
 				// For other map value types, recurse
-				if err := t.applyTemplates(val, meta); err != nil {
+				if err := t.applyTemplates(val, meta, customParameters); err != nil {
 					return err
 				}
 			}

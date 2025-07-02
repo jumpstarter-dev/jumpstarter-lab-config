@@ -33,3 +33,19 @@ func (p *Parameters) SetFromMap(params map[string]string) {
 func (p *Parameters) Set(key, value string) {
 	p.parameters[key] = value
 }
+
+func (p *Parameters) Merge(other *Parameters) *Parameters {
+	if other == nil && p == nil {
+		return nil
+	}
+	newParams := NewParameters("merged")
+	if p != nil {
+		newParams.SetFromMap(p.parameters)
+		newParams.context = newParams.context + "-" + p.context
+	}
+	if other != nil {
+		newParams.SetFromMap(other.parameters)
+		newParams.context = newParams.context + "-" + other.context
+	}
+	return newParams
+}
