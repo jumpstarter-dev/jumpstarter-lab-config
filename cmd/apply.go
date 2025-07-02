@@ -57,56 +57,50 @@ var applyCmd = &cobra.Command{
 		}
 
 		if dryRun {
-			for _, host := range cfg.Loaded.ExporterHosts {
-				hostCopy := host.DeepCopy()
-				err = tapplier.Apply(hostCopy)
-				if err != nil {
-					return fmt.Errorf("error applying template for %s: %w", host.Name, err)
-				}
-				fmt.Printf("Exporter host: %s\n", hostCopy.Name)
-				hostSsh, err := ssh.NewSSHHostManager(hostCopy)
-				if err != nil {
-					return fmt.Errorf("error creating SSH host manager for %s: %w", host.Name, err)
-				}
-				status, err := hostSsh.Status()
-				if err != nil {
-					return fmt.Errorf("error getting status for %s: %w", host.Name, err)
-				}
-				fmt.Printf("Status: %s\n", status)
-			}
-
-			for _, inst := range cfg.Loaded.JumpstarterInstances {
-				instanceCopy := inst.DeepCopy()
-				err = tapplier.Apply(instanceCopy)
-				if err != nil {
-					return fmt.Errorf("error applying template for %s: %w", inst.Name, err)
-				}
-				instanceClient, err := instance.NewInstance(instanceCopy, instanceCopy.Spec.Kubeconfig)
-				if err != nil {
-					return fmt.Errorf("error creating instance for %s: %w", inst.Name, err)
-				}
-
-				// list all exporters in the instance
-				exporters, err := instanceClient.ListExporters(context.Background())
-				if err != nil {
-					return fmt.Errorf("error listing exporters for %s: %w", inst.Name, err)
-				}
-				for _, exporter := range exporters.Items {
-					fmt.Println("--------------------------------")
-					fmt.Printf("Exporter: %+v\n", exporter)
-					fmt.Println("--------------------------------")
-				}
-			}
-
+			fmt.Println("Dry run: Would apply changes to:")
+			fmt.Println()
 		} else {
 			fmt.Println("Applying changes:")
 			fmt.Println()
-			// TODO: Implement actual apply logic
-			if prune {
-				fmt.Println("⚠️ Prune mode enabled: unused resources will be deleted")
+		}
+
+		for _, inst := range cfg.Loaded.JumpstarterInstances {
+			instanceCopy := inst.DeepCopy()
+			err = tapplier.Apply(instanceCopy)
+			if err != nil {
+				return fmt.Errorf("error applying template for %s: %w", inst.Name, err)
+			}
+			instanceClient, err := instance.NewInstance(instanceCopy, instanceCopy.Spec.Kubeconfig, dryRun, prune)
+			if err != nil {
+				return fmt.Errorf("error creating instance for %s: %w", inst.Name, err)
+			}
+
+			err = instanceClient.SyncClients(context.Background(), cfg)
+			// list all exporters in the instance
+
+			if err != nil {
+				return fmt.Errorf("error syncing clients for %s: %w", inst.Name, err)
 			}
 		}
 
+		fmt.Println("Syncing exporter hosts via SSH===========================")
+		for _, host := range cfg.Loaded.ExporterHosts {
+			hostCopy := host.DeepCopy()
+			err = tapplier.Apply(hostCopy)
+			if err != nil {
+				return fmt.Errorf("error applying template for %s: %w", host.Name, err)
+			}
+			fmt.Printf("Exporter host: %s\n", hostCopy.Name)
+			hostSsh, err := ssh.NewSSHHostManager(hostCopy)
+			if err != nil {
+				return fmt.Errorf("error creating SSH host manager for %s: %w", host.Name, err)
+			}
+			status, err := hostSsh.Status()
+			if err != nil {
+				return fmt.Errorf("error getting status for %s: %w", host.Name, err)
+			}
+			fmt.Printf("Status: %s\n", status)
+		}
 		return nil
 	},
 }
