@@ -84,9 +84,7 @@ func (m *SSHHostManager) runCommand(command string) (*CommandResult, error) {
 		return nil, fmt.Errorf("failed to create SSH session for %q: %w", m.ExporterHost.Name, err)
 	}
 	defer func() {
-		if closeErr := session.Close(); closeErr != nil {
-			log.Printf("Failed to close SSH session for %q: %v", m.ExporterHost.Name, closeErr)
-		}
+		_ = session.Close() // nolint:errcheck
 	}()
 
 	stdout, err := session.StdoutPipe()
