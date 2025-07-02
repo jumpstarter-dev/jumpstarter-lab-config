@@ -23,6 +23,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
+	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config_lint"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/exporter/ssh"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/instance"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/templating"
@@ -50,7 +51,7 @@ var applyCmd = &cobra.Command{
 			return fmt.Errorf("error loading config file %s: %w", configFilePath, err)
 		}
 
-		cfg.Validate()
+		config_lint.Validate(cfg.Loaded)
 		tapplier, err := templating.NewTemplateApplier(cfg, nil)
 		if err != nil {
 			return fmt.Errorf("error creating template applier %w", err)

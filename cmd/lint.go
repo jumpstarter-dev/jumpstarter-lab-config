@@ -22,6 +22,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
+	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config_lint"
 )
 
 var lintCmd = &cobra.Command{
@@ -45,7 +46,7 @@ var lintCmd = &cobra.Command{
 
 		fmt.Println("🔍 Validating configuration...")
 
-		cfg.Validate()
+		config_lint.Validate(cfg.Loaded)
 
 		return nil
 	},

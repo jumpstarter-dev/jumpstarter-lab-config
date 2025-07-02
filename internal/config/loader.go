@@ -34,6 +34,43 @@ type LoadedLabConfig struct {
 	SourceFiles map[string]map[string]string
 }
 
+// Getter methods to implement the LintableConfig interface
+func (cfg *LoadedLabConfig) GetClients() map[string]*jsApi.Client {
+	return cfg.Clients
+}
+
+func (cfg *LoadedLabConfig) GetPolicies() map[string]*jsApi.ExporterAccessPolicy {
+	return cfg.Policies
+}
+
+func (cfg *LoadedLabConfig) GetPhysicalLocations() map[string]*api.PhysicalLocation {
+	return cfg.PhysicalLocations
+}
+
+func (cfg *LoadedLabConfig) GetExporterHosts() map[string]*api.ExporterHost {
+	return cfg.ExporterHosts
+}
+
+func (cfg *LoadedLabConfig) GetExporterInstances() map[string]*api.ExporterInstance {
+	return cfg.ExporterInstances
+}
+
+func (cfg *LoadedLabConfig) GetExporterConfigTemplates() map[string]*api.ExporterConfigTemplate {
+	return cfg.ExporterConfigTemplates
+}
+
+func (cfg *LoadedLabConfig) GetJumpstarterInstances() map[string]*api.JumpstarterInstance {
+	return cfg.JumpstarterInstances
+}
+
+func (cfg *LoadedLabConfig) GetVariables() *vars.Variables {
+	return cfg.Variables
+}
+
+func (cfg *LoadedLabConfig) GetSourceFiles() map[string]map[string]string {
+	return cfg.SourceFiles
+}
+
 var (
 	scheme       = runtime.NewScheme()
 	codecFactory serializer.CodecFactory
