@@ -3,9 +3,14 @@ package instance
 import (
 	"context"
 	"fmt"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/jumpstarter-dev/jumpstarter-controller/api/v1alpha1"
+	v1alpha1Config "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
+	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/exporter/template"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -74,6 +79,58 @@ func (i *Instance) createExporter(ctx context.Context, exporter *v1alpha1.Export
 	return i.client.Create(ctx, exporter)
 }
 
+func (i *Instance) waitExporterCredentials(ctx context.Context, exporter *v1alpha1.Exporter) (*template.ServiceParameters, error) {
+	maxRetries := 10
+	retryDelay := 1 * time.Second
+	var err error
+
+	// the exporter object needs the namespace of the jumpstarter instance
+	exporter.Namespace = i.config.Spec.Namespace
+	for r := 0; r < maxRetries; r++ {
+		var serviceParameters *template.ServiceParameters
+		serviceParameters, err = i.getExporterCredentials(ctx, exporter)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get exporter credentials: %w", err)
+		}
+		if serviceParameters != nil {
+			return serviceParameters, nil
+		}
+		time.Sleep(retryDelay)
+		retryDelay *= 2
+		if retryDelay > 10*time.Second {
+			retryDelay = 10 * time.Second
+		}
+	}
+	return nil, fmt.Errorf("failed to get exporter credentials after %d retries, last error: %w", maxRetries, err)
+}
+
+func (i *Instance) getExporterCredentials(ctx context.Context, exporter *v1alpha1.Exporter) (*template.ServiceParameters, error) {
+	exporterObj := &v1alpha1.Exporter{}
+	err := i.client.Get(ctx, client.ObjectKey{Namespace: exporter.Namespace, Name: exporter.Name}, exporterObj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get exporter %s: %w", exporter.Name, err)
+	}
+
+	if exporterObj.Status.Credential == nil {
+		return nil, nil
+	}
+
+	secret := &corev1.Secret{}
+	if err = i.client.Get(ctx, client.ObjectKey{Namespace: exporter.Namespace, Name: exporterObj.Status.Credential.Name}, secret); err != nil {
+		return nil, fmt.Errorf("failed to get secret %s: %w", exporterObj.Status.Credential.Name, err)
+	}
+
+	token, ok := secret.Data["token"]
+	if !ok {
+		return nil, fmt.Errorf("secret %s does not contain a token", exporterObj.Status.Credential.Name)
+	}
+
+	return &template.ServiceParameters{
+		Token: string(token),
+		TlsCA: "", // TODO: add tls ca when we have it
+	}, nil
+}
+
 // deleteExporter deletes an exporter by name
 //
 //nolint:unused
@@ -97,17 +154,22 @@ func (i *Instance) deleteExporter(ctx context.Context, name string) error {
 	return i.client.Delete(ctx, exporter)
 }
 
-func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config) error {
+func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config) (map[string]template.ServiceParameters, error) {
+	serviceParametersMap := make(map[string]template.ServiceParameters)
 	fmt.Printf("🔄 [%s] Syncing exporters ===========================\n", i.config.Name)
 	instanceExporters, err := i.listExporters(ctx)
 	if err != nil {
-		return fmt.Errorf("[%s] failed to list exporters: %w", i.config.Name, err)
+		return nil, fmt.Errorf("[%s] failed to list exporters: %w", i.config.Name, err)
 	}
 
 	// convert configExporterMap to a map of exporter name to exporter objects
 	configExporterMap := make(map[string]v1alpha1.Exporter)
 	for _, cfgExporterInstance := range cfg.Loaded.ExporterInstances {
-		exporterObj := cfgExporterInstance.GetExporterObjectForInstance(i.config.Name)
+
+		exporterObj, err := GetExporterObjectForInstance(cfg, cfgExporterInstance, i.config.Name)
+		if err != nil {
+			return nil, fmt.Errorf("[%s] failed to get exporter object for instance %s: %w", i.config.Name, cfgExporterInstance.Name, err)
+		}
 		if exporterObj != nil {
 			configExporterMap[cfgExporterInstance.Name] = *exporterObj
 		}
@@ -124,7 +186,7 @@ func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config) error 
 		if _, ok := configExporterMap[instanceExporter.Name]; !ok {
 			err := i.deleteExporter(ctx, instanceExporter.Name)
 			if err != nil {
-				return fmt.Errorf("[%s] failed to delete exporter %s: %w", i.config.Name, instanceExporter.Name, err)
+				return nil, fmt.Errorf("[%s] failed to delete exporter %s: %w", i.config.Name, instanceExporter.Name, err)
 			}
 		}
 	}
@@ -136,9 +198,14 @@ func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config) error 
 		if _, ok := instanceExporterMap[cfgExporter.Name]; !ok {
 			err := i.createExporter(ctx, &cfgExporter)
 			if err != nil {
-				return fmt.Errorf("[%s] failed to create exporter %s: %w", i.config.Name, cfgExporter.Name, err)
+				return nil, fmt.Errorf("[%s] failed to create exporter %s: %w", i.config.Name, cfgExporter.Name, err)
 			}
 		}
+		serviceParameters, err := i.waitExporterCredentials(ctx, &cfgExporter)
+		if err != nil {
+			return nil, fmt.Errorf("[%s] failed to wait for exporter credentials for %s: %w", i.config.Name, cfgExporter.Name, err)
+		}
+		serviceParametersMap[cfgExporter.Name] = *serviceParameters
 	}
 
 	// update exporters that are in both config and instance
@@ -147,10 +214,41 @@ func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config) error 
 
 			err := i.updateExporter(ctx, &instanceExporter, &exporterObj)
 			if err != nil {
-				return fmt.Errorf("[%s] failed to update exporter %s: %w", i.config.Name, instanceExporter.Name, err)
+				return nil, fmt.Errorf("[%s] failed to update exporter %s: %w", i.config.Name, instanceExporter.Name, err)
 			}
+
+			serviceParameters, err := i.waitExporterCredentials(ctx, &exporterObj)
+			if err != nil {
+				return nil, fmt.Errorf("[%s] failed to wait for exporter credentials for %s: %w", i.config.Name, exporterObj.Name, err)
+			}
+			serviceParametersMap[exporterObj.Name] = *serviceParameters
 		}
 	}
 
-	return nil
+	return serviceParametersMap, nil
+}
+
+func GetExporterObjectForInstance(cfg *config.Config, e *v1alpha1Config.ExporterInstance, jumpstarterInstance string) (*v1alpha1.Exporter, error) {
+	// If this exporter instance is targeting the given jumpstarter instance, return the exporter object
+	if e.Spec.JumpstarterInstanceRef.Name == jumpstarterInstance {
+		// we need to render the exporter instance to get the right labels based on the underlying template
+		et, err := template.NewExporterInstanceTemplater(cfg, e)
+		if err != nil {
+			return nil, fmt.Errorf("error creating ExporterInstanceTemplater for ExporterInstance %s : %w", e.Name, err)
+		}
+		metadata := e.ObjectMeta.DeepCopy()
+		metadata.Labels, err = et.RenderTemplateLabels()
+		if err != nil {
+			return nil, fmt.Errorf("error rendering labels for ExporterInstance %s : %w", e.Name, err)
+		}
+
+		return &v1alpha1.Exporter{
+			TypeMeta:   e.TypeMeta,
+			ObjectMeta: *metadata,
+			Spec: v1alpha1.ExporterSpec{
+				Username: &e.Spec.Username,
+			},
+		}, nil
+	}
+	return nil, nil
 }

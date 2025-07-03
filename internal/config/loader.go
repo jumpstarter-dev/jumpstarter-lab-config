@@ -55,6 +55,16 @@ func (cfg *LoadedLabConfig) GetExporterInstances() map[string]*api.ExporterInsta
 	return cfg.ExporterInstances
 }
 
+func (cfg *LoadedLabConfig) GetExporterInstancesByExporterHost(exporterHostName string) []*api.ExporterInstance {
+	exporterInstances := []*api.ExporterInstance{}
+	for _, exporterInstance := range cfg.ExporterInstances {
+		if exporterInstance.Spec.ExporterHostRef.Name == exporterHostName {
+			exporterInstances = append(exporterInstances, exporterInstance)
+		}
+	}
+	return exporterInstances
+}
+
 func (cfg *LoadedLabConfig) GetExporterConfigTemplates() map[string]*api.ExporterConfigTemplate {
 	return cfg.ExporterConfigTemplates
 }
