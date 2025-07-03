@@ -38,12 +38,11 @@ func constructReplacementMap(variables *vars.Variables, parameters *Parameters, 
 		if err != nil {
 			return nil, fmt.Errorf("templating: error retrieving variable '%s': %w", key, err)
 		}
-		replacements["var."+key] = value
+		replacements["vars."+key] = value
 	}
-
 	if parameters != nil { // Add parameters to the replacement map
 		for key, value := range parameters.parameters {
-			replacements["param."+key] = value
+			replacements["params."+key] = value
 		}
 	}
 

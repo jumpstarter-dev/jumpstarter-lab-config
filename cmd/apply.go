@@ -51,7 +51,7 @@ var applyCmd = &cobra.Command{
 			return fmt.Errorf("error loading config file %s: %w", configFilePath, err)
 		}
 
-		config_lint.Validate(cfg.Loaded)
+		config_lint.Validate(cfg)
 		tapplier, err := templating.NewTemplateApplier(cfg, nil)
 		if err != nil {
 			return fmt.Errorf("error creating template applier %w", err)

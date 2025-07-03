@@ -8,13 +8,18 @@ import (
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/templating"
 )
 
+type ServiceParameters struct {
+	TlsCA string
+	Token string
+}
 type ExporterInstanceTemplater struct {
 	config                 *config.Config
 	exporterInstance       *v1alpha1.ExporterInstance
 	exporterConfigTemplate *v1alpha1.ExporterConfigTemplate
+	serviceParameters      ServiceParameters
 }
 
-func NewExporterInstanceTemplate(cfg *config.Config, exporterInstance *v1alpha1.ExporterInstance) (*ExporterInstanceTemplater, error) {
+func NewExporterInstanceTemplater(cfg *config.Config, exporterInstance *v1alpha1.ExporterInstance) (*ExporterInstanceTemplater, error) {
 	exporterConfigTemplate, ok := cfg.Loaded.ExporterConfigTemplates[exporterInstance.Spec.ConfigTemplateRef.Name]
 	if !ok {
 		return nil, fmt.Errorf("exporter config template %s not found", exporterInstance.Spec.ConfigTemplateRef.Name)
@@ -24,6 +29,17 @@ func NewExporterInstanceTemplate(cfg *config.Config, exporterInstance *v1alpha1.
 		exporterInstance:       exporterInstance,
 		exporterConfigTemplate: exporterConfigTemplate,
 	}, nil
+}
+
+func (e *ExporterInstanceTemplater) SetServiceParameters(serviceParameters ServiceParameters) {
+	e.serviceParameters = serviceParameters
+}
+
+func (s *ServiceParameters) Parameters() *templating.Parameters {
+	parameters := templating.NewParameters("service")
+	parameters.Set("tls_ca", s.TlsCA)
+	parameters.Set("token", s.Token)
+	return parameters
 }
 
 // renderTemplates applies templates to both the exporterInstance and exporterConfigTemplate
@@ -37,20 +53,42 @@ func (e *ExporterInstanceTemplater) renderTemplates() (*v1alpha1.ExporterInstanc
 	exporterInstanceCopy := e.exporterInstance.DeepCopy()
 	err = tapplier.Apply(exporterInstanceCopy)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error applying template %w", err)
+		return nil, nil, fmt.Errorf("ExporterInstance: %w", err)
+	}
+
+	namespace, endpoint, err := e.GetNamespaceAndEndpoint()
+	if err != nil {
+		return nil, nil, err
 	}
 
 	templateParametersMap := exporterInstanceCopy.Spec.ConfigTemplateRef.Parameters
+	templateParametersMap["namespace"] = namespace
+	templateParametersMap["endpoint"] = endpoint
 	templateParameters := templating.NewParameters("exporter-instance")
 	templateParameters.SetFromMap(templateParametersMap)
 
 	exporterConfigTemplateCopy := e.exporterConfigTemplate.DeepCopy()
-	err = tapplier.ApplyWithParameters(exporterConfigTemplateCopy, templateParameters)
+
+	err = tapplier.ApplyWithParameters(exporterConfigTemplateCopy,
+		templateParameters.Merge(e.serviceParameters.Parameters()))
+
 	if err != nil {
-		return nil, nil, fmt.Errorf("error applying template %w", err)
+		return nil, nil, fmt.Errorf("ExporterConfigTemplate: %w", err)
 	}
 
 	return exporterInstanceCopy, exporterConfigTemplateCopy, nil
+}
+
+func (e *ExporterInstanceTemplater) GetNamespaceAndEndpoint() (string, string, error) {
+	jsJumpstarterInstanceName := e.exporterInstance.Spec.JumpstarterInstanceRef.Name
+	jsJumpstarterInstance, ok := e.config.Loaded.GetJumpstarterInstances()[jsJumpstarterInstanceName]
+	if !ok {
+		return "", "", fmt.Errorf("in ExporterInstance %s: jumpstarter instance %s not found", e.exporterInstance.Name, jsJumpstarterInstanceName)
+	}
+	if len(jsJumpstarterInstance.Spec.Endpoints) == 0 {
+		return "", "", fmt.Errorf("in ExporterInstance %s: jumpstarter instance %s has no endpoints", e.exporterInstance.Name, jsJumpstarterInstanceName)
+	}
+	return jsJumpstarterInstance.Spec.Namespace, jsJumpstarterInstance.Spec.Endpoints[0], nil
 }
 
 func (e *ExporterInstanceTemplater) RenderTemplateLabels() (map[string]string, error) {

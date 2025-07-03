@@ -3,6 +3,7 @@ module github.com/jumpstarter-dev/jumpstarter-lab-config
 go 1.24.0
 
 require (
+	github.com/google/go-cmp v0.7.0
 	github.com/jumpstarter-dev/jumpstarter-controller v0.5.1-0.20250606161717-bc276583f2c6
 	github.com/pkg/sftp v1.13.9
 	github.com/spf13/cobra v1.8.1
@@ -28,7 +29,6 @@ require (
 	github.com/go-openapi/swag v0.23.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/gnostic-models v0.6.9 // indirect
-	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.24.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

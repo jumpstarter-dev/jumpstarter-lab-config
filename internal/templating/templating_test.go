@@ -16,10 +16,10 @@ const (
 )
 
 func TestApplyReplacements_Simple(t *testing.T) {
-	data := "Hello $(var.name), welcome to $(param.place)!"
+	data := "Hello $(vars.name), welcome to $(params.place)!"
 	replacements := map[string]string{
-		"var.name":    "Alice",
-		"param.place": "Wonderland",
+		"vars.name":    "Alice",
+		"params.place": "Wonderland",
 	}
 	expected := "Hello Alice, welcome to Wonderland!"
 	result, err := applyReplacements(data, replacements)
@@ -32,10 +32,10 @@ func TestApplyReplacements_Simple(t *testing.T) {
 }
 
 func TestApplyReplacements_WithSpaces(t *testing.T) {
-	data := "User: $(   var.user   ), Location: $( param.location )"
+	data := "User: $(   vars.user   ), Location: $( params.location )"
 	replacements := map[string]string{
-		"var.user":       "Bob",
-		"param.location": "Lab",
+		"vars.user":       "Bob",
+		"params.location": "Lab",
 	}
 	expected := "User: Bob, Location: Lab"
 	result, err := applyReplacements(data, replacements)
@@ -48,9 +48,9 @@ func TestApplyReplacements_WithSpaces(t *testing.T) {
 }
 
 func TestApplyReplacements_MultipleOccurrences(t *testing.T) {
-	data := "$(var.x) and $(var.x) again"
+	data := "$(vars.x) and $(vars.x) again"
 	replacements := map[string]string{
-		"var.x": "42",
+		"vars.x": "42",
 	}
 	expected := "42 and 42 again"
 	result, err := applyReplacements(data, replacements)
@@ -66,7 +66,7 @@ func TestApplyReplacements_MultipleOccurrences(t *testing.T) {
 func TestApplyReplacements_NoMatch(t *testing.T) {
 	data := "Nothing to replace here either"
 	replacements := map[string]string{
-		"var.x": "42",
+		"vars.x": "42",
 	}
 	expected := data
 	result, err := applyReplacements(data, replacements)
@@ -79,7 +79,7 @@ func TestApplyReplacements_NoMatch(t *testing.T) {
 }
 
 func TestApplyReplacements_EmptyReplacements(t *testing.T) {
-	data := "Hello $(var.name)"
+	data := "Hello $(vars.name)"
 	replacements := map[string]string{}
 	expected := data
 	result, err := applyReplacements(data, replacements)
@@ -92,7 +92,7 @@ func TestApplyReplacements_EmptyReplacements(t *testing.T) {
 	}
 }
 func TestProcessTemplate_Basic(t *testing.T) {
-	input := "Hello $(var.name), welcome to $(param.place)!"
+	input := "Hello $(vars.name), welcome to $(params.place)!"
 	expected := "Hello Alice, welcome to Wonderland!"
 	varsMock, err := vars.NewVariables("")
 	if err != nil {
@@ -125,7 +125,7 @@ func TestProcessTemplate_MultipleVariablesAndParams(t *testing.T) {
 		parameters: map[string]string{"mission": "Secret", "location": "HQ"},
 	}
 
-	input := "Agent $(var.user) (#$(var.id)) on $(param.mission) at $(param.location)"
+	input := "Agent $(vars.user) (#$(vars.id)) on $(params.mission) at $(params.location)"
 	expected := "Agent Charlie (#007) on Secret at HQ"
 
 	result, err := ProcessTemplate(input, varsMock, params, nil)
@@ -164,7 +164,7 @@ func TestProcessTemplate_MissingVariable_Error(t *testing.T) {
 	params := &Parameters{
 		parameters: map[string]string{},
 	}
-	input := "Hello $(var.missing)"
+	input := "Hello $(vars.missing)"
 	_, err = ProcessTemplate(input, varsMock, params, nil)
 	if err == nil {
 		t.Errorf("expected error for missing variable, got nil")
@@ -179,7 +179,7 @@ func TestProcessTemplate_ParameterOnly_NewVars(t *testing.T) {
 	params := &Parameters{
 		parameters: map[string]string{"foo": "bar"},
 	}
-	input := "Param: $(param.foo)"
+	input := "Param: $(params.foo)"
 	expected := "Param: bar"
 	result, err := ProcessTemplate(input, varsMock, params, nil)
 	if err != nil {
@@ -217,7 +217,7 @@ func TestProcessTemplate_MissingVariable(t *testing.T) {
 	params := &Parameters{
 		parameters: map[string]string{},
 	}
-	input := "Hello $(var.missing)"
+	input := "Hello $(vars.missing)"
 	_, err = ProcessTemplate(input, varsMock, params, nil)
 	if err == nil {
 		t.Errorf("expected error for missing variable, got nil")
@@ -229,15 +229,15 @@ func TestProcessTemplate_RecursiveReplacements(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	_ = varsMock.Set("a", "$(var.b)")
-	_ = varsMock.Set("b", "$(var.c)")
+	_ = varsMock.Set("a", "$(vars.b)")
+	_ = varsMock.Set("b", "$(vars.c)")
 	_ = varsMock.Set("c", "42")
 
 	params := &Parameters{
 		parameters: map[string]string{},
 	}
 
-	input := "Value of a: $(var.a)"
+	input := "Value of a: $(vars.a)"
 	expected := "Value of a: 42"
 	result, err := ProcessTemplate(input, varsMock, params, nil)
 	if err != nil {
@@ -252,15 +252,15 @@ func TestProcessTemplate_RecursiveReplacements_Limit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	_ = varsMock.Set("a", "$(var.a)") // Recursive definition
+	_ = varsMock.Set("a", "$(vars.a)") // Recursive definition
 
 	params := &Parameters{
 		parameters: map[string]string{},
 	}
 
-	input := "Value of a: $(var.a)"
+	input := "Value of a: $(vars.a)"
 	expectedRecursionError := "templating: recursion limit reached while applying replacements, "
-	expectedRecursionError += "check for circular references, like: var.a => $(var.a)"
+	expectedRecursionError += "check for circular references, like: vars.a => $(vars.a)"
 	_, err = ProcessTemplate(input, varsMock, params, nil)
 	if err == nil {
 		t.Errorf("expected error for recursive replacement, got nil")
@@ -288,7 +288,7 @@ func TestProcessTemplate_VaultDecryptionError(t *testing.T) {
 		t.Fatalf("failed to unset ANSIBLE_VAULT_PASSWORD_FILE: %v", err)
 	}
 
-	input := "Vault variable: $(var.vault_var)"
+	input := "Vault variable: $(vars.vault_var)"
 	_, err = ProcessTemplate(input, varsMock, params, nil)
 	if err == nil {
 		t.Errorf("Call should have failed, got nil")
@@ -331,13 +331,13 @@ func TestTemplateApplier_Apply_SimpleStruct(t *testing.T) {
 	}
 
 	testObj := &TestStruct{
-		Name:        "$(var.service)-$(param.version)",
-		Description: "Running in $(var.env) environment",
+		Name:        "$(vars.service)-$(params.version)",
+		Description: "Running in $(vars.env) environment",
 		Labels: map[string]string{
-			"service": "$(var.service)",
-			"env":     "$(var.env)",
+			"service": "$(vars.service)",
+			"env":     "$(vars.env)",
 		},
-		Tags: []string{"$(var.service)", "$(param.version)"},
+		Tags: []string{"$(vars.service)", "$(params.version)"},
 	}
 
 	err = applier.Apply(testObj)
@@ -399,13 +399,13 @@ func TestTemplateApplier_Apply_NestedStruct(t *testing.T) {
 	}
 
 	testObj := &NestedTestStruct{
-		ID: "$(var.app)-$(param.instance)",
+		ID: "$(vars.app)-$(params.instance)",
 		Config: TestStruct{
-			Name:        "$(var.app)",
-			Description: "Instance $(param.instance)",
+			Name:        "$(vars.app)",
+			Description: "Instance $(params.instance)",
 			Labels: map[string]string{
-				"app":      "$(var.app)",
-				"instance": "$(param.instance)",
+				"app":      "$(vars.app)",
+				"instance": "$(params.instance)",
 			},
 		},
 	}
@@ -508,7 +508,7 @@ func TestTemplateApplier_Apply_MissingVariable(t *testing.T) {
 	}
 
 	testObj := &TestStruct{
-		Name: "$(var.missing)",
+		Name: "$(vars.missing)",
 	}
 
 	err = applier.Apply(testObj)
@@ -537,7 +537,7 @@ func TestTemplateApplier_NewTemplateApplier_NilLoadedConfig(t *testing.T) {
 }
 
 func TestProcessTemplate_WithMeta(t *testing.T) {
-	input := "Hello $(var.name), welcome to $(param.place) this is $(someMeta)!"
+	input := "Hello $(vars.name), welcome to $(params.place) this is $(someMeta)!"
 	expected := "Hello Alice, welcome to Wonderland this is a meta variable!"
 	varsMock, err := vars.NewVariables("")
 	if err != nil {
@@ -564,7 +564,7 @@ func TestProcessTemplate_WithMeta(t *testing.T) {
 }
 
 func TestProcessTemplate_NilMeta(t *testing.T) {
-	input := "Hello $(var.name)"
+	input := "Hello $(vars.name)"
 	expected := "Hello Bob"
 	varsMock, err := vars.NewVariables("")
 	if err != nil {
@@ -632,12 +632,12 @@ func TestTemplateApplier_Apply_WithMeta(t *testing.T) {
 		Name:        "test",
 		Description: "My name is $(name)",
 		Labels: map[string]string{
-			"service":    "$(var.service)",
-			"version":    "$(param.version)",
+			"service":    "$(vars.service)",
+			"version":    "$(params.version)",
 			"env":        "$(name) somewhere",
 			"datacenter": "$(name)'s datacenter",
 		},
-		Tags: []string{"$(var.service)", "$(name)"},
+		Tags: []string{"$(vars.service)", "$(name)"},
 	}
 
 	err = applier.Apply(testObj)

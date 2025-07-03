@@ -46,7 +46,7 @@ var lintCmd = &cobra.Command{
 
 		fmt.Println("🔍 Validating configuration...")
 
-		config_lint.Validate(cfg.Loaded)
+		config_lint.Validate(cfg)
 
 		return nil
 	},

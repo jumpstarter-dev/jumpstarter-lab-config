@@ -135,7 +135,7 @@ func (t *TemplateApplier) applyTemplates(v reflect.Value, meta *Parameters, cust
 		}
 	case reflect.String:
 		if v.CanSet() {
-			str, err := ProcessTemplate(v.String(), t.variables, t.parameters, meta)
+			str, err := ProcessTemplate(v.String(), t.variables, t.parameters.Merge(customParameters), meta)
 			if err != nil {
 				return err
 			}
