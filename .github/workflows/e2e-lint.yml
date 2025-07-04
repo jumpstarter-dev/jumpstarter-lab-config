@@ -23,5 +23,4 @@ jobs:
         run: make
 
       - name: Running Tests
-        run: |
-          ./bin/jumpstarter-lab-config lint example/jumpstarter-lab.yaml
+        run: make lint-example-config
