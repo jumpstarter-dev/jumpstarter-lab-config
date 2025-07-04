@@ -90,7 +90,7 @@ func (i *Instance) waitExporterCredentials(ctx context.Context, exporter *v1alph
 		var serviceParameters *template.ServiceParameters
 		serviceParameters, err = i.getExporterCredentials(ctx, exporter)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get exporter credentials: %w", err)
+			fmt.Printf("⌛ [%s] Waiting for exporter credentials for %s in namespace %s\n", i.config.Name, exporter.Name, exporter.Namespace)
 		}
 		if serviceParameters != nil {
 			return serviceParameters, nil
@@ -201,9 +201,17 @@ func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config) (map[s
 				return nil, fmt.Errorf("[%s] failed to create exporter %s: %w", i.config.Name, cfgExporter.Name, err)
 			}
 		}
-		serviceParameters, err := i.waitExporterCredentials(ctx, &cfgExporter)
-		if err != nil {
-			return nil, fmt.Errorf("[%s] failed to wait for exporter credentials for %s: %w", i.config.Name, cfgExporter.Name, err)
+		var serviceParameters *template.ServiceParameters
+		if !i.dryRun {
+			serviceParameters, err = i.waitExporterCredentials(ctx, &cfgExporter)
+			if err != nil {
+				return nil, fmt.Errorf("[%s] failed to wait for exporter credentials for %s: %w", i.config.Name, cfgExporter.Name, err)
+			}
+		} else {
+			serviceParameters = &template.ServiceParameters{
+				Token: "dry-run",
+				TlsCA: "",
+			}
 		}
 		serviceParametersMap[cfgExporter.Name] = *serviceParameters
 	}
