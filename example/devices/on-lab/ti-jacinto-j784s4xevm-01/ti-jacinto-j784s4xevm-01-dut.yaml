@@ -16,10 +16,11 @@ spec:
   configTemplateRef:
     name: ti-j784s4xevm
     parameters:
+      name: "$( name )"
       device_address: "$( name ).auto.bos2.dc.example.com"
       pdu_host: "some-pdu-hostname.auto.eng.bos2.bc.somedomain.com"
-      pdu_user: "$( var.pdu_st_pro3_l1_311a_user )"
-      pdu_password: "$( var.pdu_st_pro3_l1_311a_password )"
+      pdu_user: "$( vars.pdu_st_pro3_l1_311a_user )"
+      pdu_password: "$( vars.pdu_st_pro3_l1_311a_password )"
       pdu_oid: "1.3.6.1.4.1.13742.6.4.1.2.1.2.1"
       pdu_plug: "34"
       device_console: "/dev/ttyUSB0"

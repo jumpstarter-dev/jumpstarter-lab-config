@@ -69,11 +69,19 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 lint-config: golangci-lint ## Verify golangci-lint linter configuration
 	$(GOLANGCI_LINT) config verify
 
+.PHONY: lint-example-config
+lint-example-config: bin/jumpstarter-lab-config
+	./bin/jumpstarter-lab-config lint example/jumpstarter-lab.yaml
+
 ##@ Build
+clean:
+	rm -f bin/jumpstarter-lab-config
+
+bin/jumpstarter-lab-config:
+	go build -o bin/jumpstarter-lab-config cmd/*
 
 .PHONY: build
-build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/jumpstarter-lab-config cmd/*
+build: manifests generate fmt vet bin/jumpstarter-lab-config
 
 .PHONY: install
 install: build ## Build and install jumpstarter-lab-config binary to LOCALBIN.

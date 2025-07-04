@@ -38,6 +38,11 @@ type ExporterConfigTemplateSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	ConfigTemplate string `json:"configTemplate"`
+
+	// SystemdContainerTemplate is the raw YAML string content for the systemd container config template.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MinLength=1
+	SystemdContainerTemplate string `json:"systemdContainerTemplate"`
 }
 
 // ExporterMeta defines metadata for the exporter.

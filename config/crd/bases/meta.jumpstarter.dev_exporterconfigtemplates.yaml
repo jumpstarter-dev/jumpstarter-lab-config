@@ -65,6 +65,11 @@ spec:
                 required:
                 - name
                 type: object
+              systemdContainerTemplate:
+                description: SystemdContainerTemplate is the raw YAML string content
+                  for the systemd container config template.
+                minLength: 1
+                type: string
             required:
             - configTemplate
             - containerImage

@@ -23,7 +23,7 @@ spec:
       name: "$( params.name )"
     endpoint: "$( params.endpoint )"
     tls:
-      ca: $( tls_ca )"
+      ca: $( params.tls_ca )"
       insecure: true
     token: "$( params.token )"
     grpcConfig:
