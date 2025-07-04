@@ -14,6 +14,26 @@ spec:
       ram: "32"
       cpu: "8"
       location: "$( params.location_name )"
+  systemdContainerTemplate: |
+    [Unit]
+    Description=$( params.name ) jumpstarter exporter
+    [Container]
+    ContainerName=$( params.name )
+    Exec=/jumpstarter/bin/jmp run --exporter $( params.name )
+    Image=$( params.container_image )
+    Pull=Always
+    Network=host
+    PodmanArgs=--privileged
+    Volume=/run/udev:/run/udev
+    Volume=/dev:/dev
+    Volume=/etc/jumpstarter:/etc/jumpstarter
+    Volume=/var/lib:/var/lib
+    [Service]
+    Restart=always
+    StartLimitBurst=0
+    [Install]
+    WantedBy=multi-user.target default.target
+
   configTemplate:  |
     # this is the config file installed in /etc/jumpstarter/exporters/$( name )".yaml
     apiVersion: jumpstarter.dev/v1alpha1
