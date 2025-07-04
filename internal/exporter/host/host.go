@@ -18,6 +18,7 @@ package host
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/exporter/ssh"
@@ -25,16 +26,37 @@ import (
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/templating"
 )
 
+type ExporterHostSyncer struct {
+	cfg                  *config.Config
+	tapplier             *templating.TemplateApplier
+	serviceParametersMap map[string]template.ServiceParameters
+	dryRun               bool
+	debugConfigs         bool
+}
+
+func NewExporterHostSyncer(cfg *config.Config,
+	tapplier *templating.TemplateApplier,
+	serviceParametersMap map[string]template.ServiceParameters,
+	dryRun, debugConfigs bool) *ExporterHostSyncer {
+	return &ExporterHostSyncer{
+		cfg:                  cfg,
+		tapplier:             tapplier,
+		serviceParametersMap: serviceParametersMap,
+		dryRun:               dryRun,
+		debugConfigs:         debugConfigs,
+	}
+}
+
 // SyncExporterHosts synchronizes exporter hosts via SSH
-func SyncExporterHosts(cfg *config.Config, tapplier *templating.TemplateApplier, serviceParametersMap map[string]template.ServiceParameters) error {
+func (e *ExporterHostSyncer) SyncExporterHosts() error {
 	fmt.Print("\n🔄 Syncing exporter hosts via SSH ===========================\n\n")
-	for _, host := range cfg.Loaded.ExporterHosts {
+	for _, host := range e.cfg.Loaded.ExporterHosts {
 		hostCopy := host.DeepCopy()
-		err := tapplier.Apply(hostCopy)
+		err := e.tapplier.Apply(hostCopy)
 		if err != nil {
 			return fmt.Errorf("error applying template for %s: %w", host.Name, err)
 		}
-		fmt.Printf("💻  Exporter host: %s\n", hostCopy.Name)
+		fmt.Printf("\n💻  Exporter host: %s\n", hostCopy.Spec.Addresses[0])
 		hostSsh, err := ssh.NewSSHHostManager(hostCopy)
 		if err != nil {
 			return fmt.Errorf("error creating SSH host manager for %s: %w", host.Name, err)
@@ -45,12 +67,12 @@ func SyncExporterHosts(cfg *config.Config, tapplier *templating.TemplateApplier,
 		}
 		fmt.Printf("    Connection status: %s\n", status)
 
-		exporterInstances := cfg.Loaded.GetExporterInstancesByExporterHost(host.Name)
+		exporterInstances := e.cfg.Loaded.GetExporterInstancesByExporterHost(host.Name)
 		for _, exporterInstance := range exporterInstances {
 			fmt.Printf("    📟 Exporter instance: %s\n", exporterInstance.Name)
 			errName := "ExporterInstance:" + exporterInstance.Name
-			et, err := template.NewExporterInstanceTemplater(cfg, exporterInstance)
-			serviceParameters, ok := serviceParametersMap[exporterInstance.Name]
+			et, err := template.NewExporterInstanceTemplater(e.cfg, exporterInstance)
+			serviceParameters, ok := e.serviceParametersMap[exporterInstance.Name]
 			if !ok {
 				return fmt.Errorf("service parameters not found for %s", exporterInstance.Name)
 			}
@@ -63,11 +85,24 @@ func SyncExporterHosts(cfg *config.Config, tapplier *templating.TemplateApplier,
 			if err != nil {
 				return fmt.Errorf("error creating ExporterInstanceTemplater for %s : %w", errName, err)
 			}
-			_, err = et.RenderTemplateConfig()
+			tcfg, err := et.RenderTemplateConfig()
 			if err != nil {
 				return fmt.Errorf("error rendering template config for %s : %w", errName, err)
 			}
 			fmt.Printf("   	[%s] Rendered config correctly\n", exporterInstance.Name)
+
+			if e.debugConfigs {
+				fmt.Printf("--- 📄 Config Template %s\n", strings.Repeat("─", 40))
+				fmt.Printf("%s\n", tcfg.Spec.ConfigTemplate)
+				fmt.Printf("  - ⚙️  Systemd Container Template %s\n", strings.Repeat("─", 30))
+				fmt.Printf("%s\n", tcfg.Spec.SystemdContainerTemplate)
+				fmt.Println(strings.Repeat("─", 60))
+			}
+
+			if err := hostSsh.Apply(tcfg, e.dryRun); err != nil {
+				return fmt.Errorf("error applying exporter config for %s: %w", exporterInstance.Name, err)
+			}
+
 		}
 	}
 	return nil

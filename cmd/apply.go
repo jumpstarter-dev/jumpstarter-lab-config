@@ -39,6 +39,7 @@ var applyCmd = &cobra.Command{
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		prune, _ := cmd.Flags().GetBool("prune")
 		vaultPassFile, _ := cmd.Flags().GetString("vault-password-file")
+		debugConfigs, _ := cmd.Flags().GetBool("debug-configs")
 
 		// Determine config file path
 		configFilePath := "jumpstarter-lab.yaml" // default
@@ -89,7 +90,9 @@ var applyCmd = &cobra.Command{
 			}
 		}
 
-		err = host.SyncExporterHosts(cfg, tapplier, serviceParametersMap)
+		exporterHostSyncer := host.NewExporterHostSyncer(cfg, tapplier, serviceParametersMap, dryRun, debugConfigs)
+
+		err = exporterHostSyncer.SyncExporterHosts()
 		if err != nil {
 			return fmt.Errorf("error syncing exporter hosts: %w", err)
 		}
@@ -103,6 +106,7 @@ func init() {
 	applyCmd.Flags().Bool("dry-run", false, "Show what would be applied without making changes")
 	applyCmd.Flags().Bool("prune", false, "Delete resources that are no longer defined in configuration")
 	applyCmd.Flags().String("vault-password-file", "", "Path to the vault password file for decrypting variables")
+	applyCmd.Flags().Bool("debug-configs", false, "Show debug configs")
 
 	rootCmd.AddCommand(applyCmd)
 }

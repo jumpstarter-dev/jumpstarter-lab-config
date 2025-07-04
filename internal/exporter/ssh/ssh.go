@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -19,7 +20,7 @@ type HostManager interface {
 	Status() (string, error)
 	NeedsUpdate() (bool, error)
 	Diff() (string, error)
-	Apply() error
+	Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, dryRun bool) error
 }
 
 // CommandResult represents the result of running a command via SSH
@@ -136,12 +137,17 @@ func (m *SSHHostManager) runCommand(command string) (*CommandResult, error) {
 			return nil, fmt.Errorf("failed to run command for %q: %w", m.ExporterHost.Name, err)
 		}
 	}
+	err = nil
+
+	if exitCode != 0 {
+		err = fmt.Errorf("failed to run command for %q: %q", m.ExporterHost.Name, string(stderrBytes))
+	}
 
 	return &CommandResult{
 		Stdout:   string(stdoutBytes),
 		Stderr:   string(stderrBytes),
 		ExitCode: exitCode,
-	}, nil
+	}, err
 }
 
 func (m *SSHHostManager) NeedsUpdate() (bool, error) {
@@ -152,9 +158,115 @@ func (m *SSHHostManager) Diff() (string, error) {
 	return "Not implemented yet", nil
 }
 
-func (m *SSHHostManager) Apply() error {
+func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, dryRun bool) error {
+
+	svcName := exporterConfig.Spec.ExporterMetadata.Name
+	containerSystemdFile := "/etc/containers/systemd/" + svcName + ".container"
+	exporterConfigFile := "/etc/jumpstarter/exporters/" + svcName + ".yaml"
+
+	changedSystemd, err := m.reconcileFile(containerSystemdFile, exporterConfig.Spec.SystemdContainerTemplate, dryRun)
+	if err != nil {
+		return fmt.Errorf("failed to reconcile container systemd file: %w", err)
+	}
+
+	changedExporterConfig, err := m.reconcileFile(exporterConfigFile, exporterConfig.Spec.ConfigTemplate, dryRun)
+	if err != nil {
+		return fmt.Errorf("failed to reconcile exporter config file: %w", err)
+	}
+
+	// if any of the files changed, reload systemd, enable service and restart the exporter
+	if changedExporterConfig || changedSystemd && !dryRun {
+		_, err := m.runCommand("systemctl daemon-reload")
+		if err != nil {
+			return fmt.Errorf("failed to reload systemd: %w", err)
+		}
+		_, err = m.runCommand("systemctl start " + svcName)
+		if err != nil {
+			return fmt.Errorf("failed to enable exporter: %w", err)
+		}
+
+		_, err = m.runCommand("systemctl restart " + svcName)
+		if err != nil {
+			return fmt.Errorf("failed to restart exporter: %w", err)
+		}
+	}
 
 	return nil
+}
+
+func (m *SSHHostManager) reconcileFile(path string, content string, dryRun bool) (bool, error) {
+	// Check if file exists and read its content
+	file, err := m.sftpClient.Open(path)
+	if err != nil {
+		// File doesn't exist, we need to create it
+		if dryRun {
+			fmt.Printf("            📄 Would create file: %s\n", path)
+			return true, nil
+		}
+
+		// Create parent directories if needed
+		parentDir := filepath.Dir(path)
+		if parentDir != "/" && parentDir != "." {
+			err = m.sftpClient.MkdirAll(parentDir)
+			if err != nil {
+				return false, fmt.Errorf("failed to create parent directories for %s: %w", path, err)
+			}
+		}
+
+		// Create the file
+		newFile, err := m.sftpClient.Create(path)
+		if err != nil {
+			return false, fmt.Errorf("failed to create file %s: %w", path, err)
+		}
+		defer func() {
+			_ = newFile.Close() // nolint:errcheck
+		}()
+
+		_, err = newFile.Write([]byte(content))
+		if err != nil {
+			return false, fmt.Errorf("failed to write content to %s: %w", path, err)
+		}
+
+		fmt.Printf("Created file: %s\n", path)
+		return true, nil
+	}
+
+	// File exists, read its content
+	existingContent, err := io.ReadAll(file)
+	_ = file.Close() // nolint:errcheck
+	if err != nil {
+		fmt.Printf("Failed to read existing file %s: %v\n", path, err)
+		return false, fmt.Errorf("failed to read existing file %s: %w", path, err)
+	}
+
+	// Check if content matches
+	if string(existingContent) == content {
+		// Content matches, no change needed
+		return false, nil
+	}
+
+	// Content doesn't match, update the file
+	if dryRun {
+		fmt.Printf("            ✏️ Would update file: %s\n", path)
+		return true, nil
+	}
+
+	updateFile, err := m.sftpClient.OpenFile(path, os.O_WRONLY|os.O_TRUNC)
+	if err != nil {
+		return false, fmt.Errorf("failed to open file %s for writing: %w", path, err)
+	}
+	defer func() {
+		_ = updateFile.Close() // nolint:errcheck
+	}()
+
+	_, err = updateFile.Write([]byte(content))
+	if err != nil {
+		fmt.Printf("Failed to write updated content to %s: %v\n", path, err)
+		return false, fmt.Errorf("failed to write updated content to %s: %w", path, err)
+	}
+
+	fmt.Printf("            ✏️ Updated file: %s\n", path)
+	return true, nil
 }
 
 func (m *SSHHostManager) createSshClient() (*ssh.Client, error) {

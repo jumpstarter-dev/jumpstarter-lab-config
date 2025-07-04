@@ -110,11 +110,11 @@ func (e *ExporterInstanceTemplater) RenderTemplateLabels() (map[string]string, e
 	return labels, nil
 }
 
-func (e *ExporterInstanceTemplater) RenderTemplateConfig() (string, error) {
+func (e *ExporterInstanceTemplater) RenderTemplateConfig() (*v1alpha1.ExporterConfigTemplate, error) {
 	_, exporterConfigTemplateCopy, err := e.renderTemplates()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return exporterConfigTemplateCopy.Spec.ConfigTemplate, nil
+	return exporterConfigTemplateCopy, nil
 }
