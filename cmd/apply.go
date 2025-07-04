@@ -24,7 +24,7 @@ import (
 
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config_lint"
-	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/exporter/ssh"
+	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/exporter/host"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/exporter/template"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/instance"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/templating"
@@ -89,50 +89,11 @@ var applyCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Println("Syncing exporter hosts via SSH ===========================")
-		for _, host := range cfg.Loaded.ExporterHosts {
-			hostCopy := host.DeepCopy()
-			err = tapplier.Apply(hostCopy)
-			if err != nil {
-				return fmt.Errorf("error applying template for %s: %w", host.Name, err)
-			}
-			fmt.Printf("Exporter host: %s\n", hostCopy.Name)
-			hostSsh, err := ssh.NewSSHHostManager(hostCopy)
-			if err != nil {
-				return fmt.Errorf("error creating SSH host manager for %s: %w", host.Name, err)
-			}
-			status, err := hostSsh.Status()
-			if err != nil {
-				return fmt.Errorf("error getting status for %s: %w", host.Name, err)
-			}
-			fmt.Printf("Connection status: %s\n", status)
-
-			exporterInstances := cfg.Loaded.GetExporterInstancesByExporterHost(host.Name)
-			for _, exporterInstance := range exporterInstances {
-				fmt.Printf("Exporter instance: %s\n", exporterInstance.Name)
-				errName := "ExporterInstance:" + exporterInstance.Name
-				et, err := template.NewExporterInstanceTemplater(cfg, exporterInstance)
-				serviceParameters, ok := serviceParametersMap[exporterInstance.Name]
-				if !ok {
-					return fmt.Errorf("service parameters not found for %s", exporterInstance.Name)
-				}
-				et.SetServiceParameters(serviceParameters)
-				if err != nil {
-					return fmt.Errorf("error creating ExporterInstanceTemplater for %s : %w", errName, err)
-				}
-
-				_, err = et.RenderTemplateLabels()
-				if err != nil {
-					return fmt.Errorf("error creating ExporterInstanceTemplater for %s : %w", errName, err)
-				}
-				_, err = et.RenderTemplateConfig()
-				if err != nil {
-					return fmt.Errorf("error rendering template config for %s : %w", errName, err)
-				}
-				fmt.Printf("Rendered config correctly for %s\n", exporterInstance.Name)
-
-			}
+		err = host.SyncExporterHosts(cfg, tapplier, serviceParametersMap)
+		if err != nil {
+			return fmt.Errorf("error syncing exporter hosts: %w", err)
 		}
+
 		return nil
 	},
 }

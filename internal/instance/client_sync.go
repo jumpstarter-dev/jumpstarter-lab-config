@@ -10,7 +10,7 @@ import (
 )
 
 func (i *Instance) SyncClients(ctx context.Context, cfg *config.Config) error {
-	fmt.Printf("🔄 [%s] Syncing clients ===========================\n", i.config.Name)
+	fmt.Printf("\n🔄 [%s] Syncing clients ===========================\n\n", i.config.Name)
 	instanceClients, err := i.listClients(ctx)
 	if err != nil {
 		return fmt.Errorf("[%s] failed to list clients: %w", i.config.Name, err)

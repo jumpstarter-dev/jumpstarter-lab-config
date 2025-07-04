@@ -156,7 +156,7 @@ func (i *Instance) deleteExporter(ctx context.Context, name string) error {
 
 func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config) (map[string]template.ServiceParameters, error) {
 	serviceParametersMap := make(map[string]template.ServiceParameters)
-	fmt.Printf("🔄 [%s] Syncing exporters ===========================\n", i.config.Name)
+	fmt.Printf("\n🔄 [%s] Syncing exporters ===========================\n\n", i.config.Name)
 	instanceExporters, err := i.listExporters(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("[%s] failed to list exporters: %w", i.config.Name, err)
