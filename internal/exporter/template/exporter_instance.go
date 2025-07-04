@@ -64,6 +64,7 @@ func (e *ExporterInstanceTemplater) renderTemplates() (*v1alpha1.ExporterInstanc
 	templateParametersMap := exporterInstanceCopy.Spec.ConfigTemplateRef.Parameters
 	templateParametersMap["namespace"] = namespace
 	templateParametersMap["endpoint"] = endpoint
+	templateParametersMap["container_image"] = e.exporterConfigTemplate.Spec.ContainerImage
 	templateParameters := templating.NewParameters("exporter-instance")
 	templateParameters.SetFromMap(templateParametersMap)
 
