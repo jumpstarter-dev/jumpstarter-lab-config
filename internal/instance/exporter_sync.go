@@ -6,6 +6,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/jumpstarter-dev/jumpstarter-controller/api/v1alpha1"
 	v1alpha1Config "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
@@ -40,26 +41,72 @@ func (i *Instance) getExporterByName(ctx context.Context, name string) (*v1alpha
 	return exporter, err
 }
 
-// updateExporter updates an exporter
+// updateExporter updates an exporter with retry logic to handle conflicts
 //
 //nolint:unused
 func (i *Instance) updateExporter(ctx context.Context, oldExporter, exporter *v1alpha1.Exporter) error {
-	// Create a copy of the current object to preserve ResourceVersion and other metadata
-	updatedExporter := oldExporter.DeepCopy()
+	maxRetries := 10
+	baseDelay := 100 * time.Millisecond
 
-	// Update the spec and other fields from the new config
-	updatedExporter.Spec = exporter.Spec
-	updatedExporter.Labels = exporter.Labels
+	latestExporter := oldExporter
 
-	// Prepare metadata (annotations, namespace, etc.)
-	// For updates, we want to preserve existing annotations and merge new ones
-	i.prepareMetadata(&updatedExporter.ObjectMeta, exporter.Annotations)
-	i.printDiff(oldExporter, updatedExporter, "exporter", updatedExporter.Name)
-	if i.dryRun {
-		return nil
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Fetch the latest version of the exporter to get current ResourceVersion
+
+		// Create a copy of the latest object to preserve ResourceVersion and other metadata
+		updatedExporter := latestExporter.DeepCopy()
+
+		// Update the spec and other fields from the new config
+		updatedExporter.Spec = exporter.Spec
+		updatedExporter.Labels = exporter.Labels
+
+		// Prepare metadata (annotations, namespace, etc.)
+		// For updates, we want to preserve existing annotations and merge new ones
+		i.prepareMetadata(&updatedExporter.ObjectMeta, exporter.Annotations)
+
+		// Only print diff on first attempt to avoid spam
+		if attempt == 0 {
+			i.printDiff(oldExporter, updatedExporter, "exporter", updatedExporter.Name)
+		}
+
+		if i.dryRun {
+			return nil
+		}
+
+		err := i.client.Update(ctx, updatedExporter)
+		if err == nil {
+			// Success
+			return nil
+		}
+
+		// Check if this is a conflict error
+		if i.isConflictError(err) {
+			if attempt < maxRetries-1 {
+				// Calculate delay with exponential backoff and jitter
+				delay := time.Duration(attempt+1) * baseDelay
+				if delay > 2*time.Second {
+					delay = 2 * time.Second
+				}
+				fmt.Printf("⚠️  [%s] Conflict updating exporter %s, retrying in %v (attempt %d/%d)\n",
+					i.config.Name, exporter.Name, delay, attempt+1, maxRetries)
+				time.Sleep(delay)
+				latestExporter = &v1alpha1.Exporter{}
+				err := i.client.Get(ctx, client.ObjectKey{
+					Namespace: i.config.Spec.Namespace,
+					Name:      exporter.Name,
+				}, latestExporter)
+				if err != nil {
+					return fmt.Errorf("failed to fetch latest exporter %s: %w", exporter.Name, err)
+				}
+				continue
+			}
+		}
+
+		// Return the error if it's not a conflict or we've exhausted retries
+		return fmt.Errorf("failed to update exporter %s after %d attempts: %w", exporter.Name, attempt+1, err)
 	}
 
-	return i.client.Update(ctx, updatedExporter)
+	return fmt.Errorf("failed to update exporter %s after %d retries due to conflicts", exporter.Name, maxRetries)
 }
 
 // createExporter creates a new exporter
@@ -259,4 +306,9 @@ func GetExporterObjectForInstance(cfg *config.Config, e *v1alpha1Config.Exporter
 		}, nil
 	}
 	return nil, nil
+}
+
+// isConflictError checks if an error is a Kubernetes conflict error
+func (i *Instance) isConflictError(err error) bool {
+	return apierrors.IsConflict(err)
 }
