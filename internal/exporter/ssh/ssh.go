@@ -175,7 +175,7 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 	}
 
 	// if any of the files changed, reload systemd, enable service and restart the exporter
-	if changedExporterConfig || changedSystemd && !dryRun {
+	if (changedExporterConfig || changedSystemd) && !dryRun {
 		_, err := m.runCommand("systemctl daemon-reload")
 		if err != nil {
 			return fmt.Errorf("failed to reload systemd: %w", err)
