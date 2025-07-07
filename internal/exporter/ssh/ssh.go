@@ -7,9 +7,11 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -194,6 +196,32 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 	return nil
 }
 
+// sanitizeDiff removes sensitive information from diff output
+func sanitizeDiff(diff string) string {
+	// Regex patterns to match sensitive fields
+	patterns := []struct {
+		pattern     string
+		replacement string
+	}{
+		// Match patterns like "token: value", "password: value", etc.
+		{`(?i)(token|password|key|secret|api_key|auth_token|bearer_token|access_token|refresh_token|client_secret|private_key|passphrase|credential)(\s*[:=]\s*)([^\s\n]+)`, `${1}${2}<TOKEN>`},
+		// Match patterns like "TOKEN=value", "PASSWORD=value", etc.
+		{`(?i)(TOKEN|PASSWORD|KEY|SECRET|API_KEY|AUTH_TOKEN|BEARER_TOKEN|ACCESS_TOKEN|REFRESH_TOKEN|CLIENT_SECRET|PRIVATE_KEY|PASSPHRASE|CREDENTIAL)(\s*=\s*)([^\s\n]+)`, `${1}${2}<TOKEN>`},
+		// Match patterns in double quotes like "token": "value"
+		{`(?i)(")(token|password|key|secret|api_key|auth_token|bearer_token|access_token|refresh_token|client_secret|private_key|passphrase|credential)("\s*[:=]\s*")([^"]+)(")`, `${1}${2}${3}<TOKEN>${5}`},
+		// Match patterns in single quotes like 'token': 'value'
+		{`(?i)(')(token|password|key|secret|api_key|auth_token|bearer_token|access_token|refresh_token|client_secret|private_key|passphrase|credential)('\s*[:=]\s*')([^']+)(')`, `${1}${2}${3}<TOKEN>${5}`},
+	}
+
+	result := diff
+	for _, p := range patterns {
+		re := regexp.MustCompile(p.pattern)
+		result = re.ReplaceAllString(result, p.replacement)
+	}
+
+	return result
+}
+
 func (m *SSHHostManager) reconcileFile(path string, content string, dryRun bool) (bool, error) {
 	// Check if file exists and read its content
 	file, err := m.sftpClient.Open(path)
@@ -245,7 +273,14 @@ func (m *SSHHostManager) reconcileFile(path string, content string, dryRun bool)
 		return false, nil
 	}
 
-	// Content doesn't match, update the file
+	// Content doesn't match, show diff and update the file
+	diff := cmp.Diff(string(existingContent), content)
+	if diff != "" {
+		sanitizedDiff := sanitizeDiff(diff)
+		fmt.Printf("            📄 Changes for file: %s\n", path)
+		fmt.Printf("            Diff (-existing +new):\n%s\n", sanitizedDiff)
+	}
+
 	if dryRun {
 		fmt.Printf("            ✏️ Would update file: %s\n", path)
 		return true, nil

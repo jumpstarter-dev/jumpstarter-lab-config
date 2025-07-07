@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
+	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -328,5 +329,61 @@ func TestSSHHostManagerInterface(t *testing.T) {
 	if err != nil && !strings.Contains(err.Error(), "SSH host is not configured") && !strings.Contains(err.Error(), "sshClient is not initialized") {
 		// We expect either success or the specific SSH host error
 		t.Errorf("Unexpected error from Status method: %v", err)
+	}
+}
+
+func TestSanitizeDiff(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "sanitize token with colon",
+			input:    "  token: abc123def456\n+ token: xyz789ghi012",
+			expected: "  token: <TOKEN>\n+ token: <TOKEN>",
+		},
+		{
+			name:     "sanitize password with equals",
+			input:    "- PASSWORD=oldpassword\n+ PASSWORD=newpassword",
+			expected: "- PASSWORD=<TOKEN>\n+ PASSWORD=<TOKEN>",
+		},
+		{
+			name:     "sanitize api_key with spaces",
+			input:    "  api_key : sk-1234567890abcdef\n+ api_key : sk-fedcba0987654321",
+			expected: "  api_key : <TOKEN>\n+ api_key : <TOKEN>",
+		},
+		{
+			name:     "sanitize quoted fields",
+			input:    `  "secret": "my-secret-value"\n+ "secret": "new-secret-value"`,
+			expected: `  "secret": "<TOKEN>"\n+ "secret": "<TOKEN>"`,
+		},
+		{
+			name:     "sanitize single quoted fields",
+			input:    `  'private_key': 'rsa-key-content'\n+ 'private_key': 'new-rsa-key-content'`,
+			expected: `  'private_key': '<TOKEN>'\n+ 'private_key': '<TOKEN>'`,
+		},
+		{
+			name:     "preserve non-sensitive fields",
+			input:    "  host: example.com\n+ host: new-example.com\n  port: 22\n+ port: 2222",
+			expected: "  host: example.com\n+ host: new-example.com\n  port: 22\n+ port: 2222",
+		},
+		{
+			name:     "mixed sensitive and non-sensitive",
+			input:    "  host: example.com\n  token: abc123\n+ host: new-example.com\n+ token: xyz789",
+			expected: "  host: example.com\n  token: <TOKEN>\n+ host: new-example.com\n+ token: <TOKEN>",
+		},
+		{
+			name:     "case insensitive matching",
+			input:    "  TOKEN: abc123\n  Token: def456\n+ token: xyz789",
+			expected: "  TOKEN: <TOKEN>\n  Token: <TOKEN>\n+ token: <TOKEN>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := sanitizeDiff(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
 	}
 }
