@@ -103,7 +103,8 @@ func (e *ExporterInstanceTemplater) RenderTemplateLabels() (map[string]string, e
 	for key, value := range exporterConfigTemplateCopy.Spec.ExporterMetadata.Labels {
 		labels[key] = value
 	}
-	for key, value := range exporterInstanceCopy.Labels {
+	// Apply/override labels from exporterInstance
+	for key, value := range exporterInstanceCopy.Spec.Labels {
 		labels[key] = value
 	}
 
