@@ -6,6 +6,7 @@ import (
 
 	"github.com/jumpstarter-dev/jumpstarter-controller/api/v1alpha1"
 	v1alphaConfig "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
+	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -356,6 +357,224 @@ func TestPrintDiff(t *testing.T) {
 			// This should not panic and should indicate no changes
 			inst.printDiff(obj, obj, "exporter", "test-exporter")
 		}
+	})
+}
+
+func TestGetExporterObjectForInstance(t *testing.T) {
+	// Create a test config (we'll use a mock/simple one for testing)
+	cfg := &config.Config{
+		Loaded: &config.LoadedLabConfig{
+			// We'll add mock data as needed
+		},
+	}
+
+	tests := []struct {
+		name                 string
+		exporterInstance     *v1alphaConfig.ExporterInstance
+		jumpstarterInstance  string
+		expectedExporter     *v1alpha1.Exporter
+		expectedError        bool
+		expectedErrorMessage string
+	}{
+		{
+			name: "exporter instance with matching jumpstarter instance and no config template",
+			exporterInstance: &v1alphaConfig.ExporterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-exporter",
+					Labels: map[string]string{
+						"app": "test",
+					},
+				},
+				Spec: v1alphaConfig.ExporterInstanceSpec{
+					Username: "test-user",
+					JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
+						Name: "target-instance",
+					},
+					// No ConfigTemplateRef - should use default metadata
+				},
+			},
+			jumpstarterInstance: "target-instance",
+			expectedExporter: &v1alpha1.Exporter{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-exporter",
+					Labels: map[string]string{
+						"app": "test",
+					},
+				},
+				Spec: v1alpha1.ExporterSpec{
+					Username: func() *string { s := "test-user"; return &s }(),
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name: "exporter instance with matching jumpstarter instance and config template",
+			exporterInstance: &v1alphaConfig.ExporterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-exporter-with-template",
+					Labels: map[string]string{
+						"app": "test",
+					},
+				},
+				Spec: v1alphaConfig.ExporterInstanceSpec{
+					Username: "test-user",
+					JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
+						Name: "target-instance",
+					},
+					ConfigTemplateRef: v1alphaConfig.ConfigTemplateRef{
+						Name: "test-template",
+					},
+				},
+			},
+			jumpstarterInstance:  "target-instance",
+			expectedExporter:     nil, // Template processing would fail in this test environment
+			expectedError:        true,
+			expectedErrorMessage: "error creating ExporterInstanceTemplater",
+		},
+		{
+			name: "exporter instance with non-matching jumpstarter instance",
+			exporterInstance: &v1alphaConfig.ExporterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-exporter",
+				},
+				Spec: v1alphaConfig.ExporterInstanceSpec{
+					Username: "test-user",
+					JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
+						Name: "other-instance",
+					},
+				},
+			},
+			jumpstarterInstance: "target-instance",
+			expectedExporter:    nil,
+			expectedError:       false,
+		},
+		{
+			name: "exporter instance with empty jumpstarter instance ref",
+			exporterInstance: &v1alphaConfig.ExporterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-exporter",
+				},
+				Spec: v1alphaConfig.ExporterInstanceSpec{
+					Username: "test-user",
+					JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
+						Name: "",
+					},
+				},
+			},
+			jumpstarterInstance: "target-instance",
+			expectedExporter:    nil,
+			expectedError:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := GetExporterObjectForInstance(cfg, tt.exporterInstance, tt.jumpstarterInstance)
+
+			if tt.expectedError {
+				assert.Error(t, err, "Expected error for case %s", tt.name)
+				if tt.expectedErrorMessage != "" {
+					assert.Contains(t, err.Error(), tt.expectedErrorMessage, "Error message should contain expected text")
+				}
+			} else {
+				assert.NoError(t, err, "Expected no error for case %s", tt.name)
+			}
+
+			if tt.expectedExporter == nil {
+				assert.Nil(t, result, "Expected nil result for case %s", tt.name)
+			} else {
+				assert.NotNil(t, result, "Expected non-nil result for case %s", tt.name)
+				assert.Equal(t, tt.expectedExporter.Name, result.Name, "Expected name to match")
+				assert.Equal(t, tt.expectedExporter.Labels, result.Labels, "Expected labels to match")
+				assert.Equal(t, tt.expectedExporter.Spec.Username, result.Spec.Username, "Expected username to match")
+			}
+		})
+	}
+}
+
+func TestGetExporterObjectForInstance_WithTemplateProcessing(t *testing.T) {
+	// Test cases that focus on the template processing logic
+	t.Run("exporter instance without config template uses original metadata", func(t *testing.T) {
+		exporterInstance := &v1alphaConfig.ExporterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-exporter",
+				Labels: map[string]string{
+					"original": "label",
+					"app":      "test",
+				},
+				Annotations: map[string]string{
+					"original": "annotation",
+				},
+			},
+			Spec: v1alphaConfig.ExporterInstanceSpec{
+				Username: "test-user",
+				JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
+					Name: "target-instance",
+				},
+				// No ConfigTemplateRef
+			},
+		}
+
+		cfg := &config.Config{
+			Loaded: &config.LoadedLabConfig{},
+		}
+
+		result, err := GetExporterObjectForInstance(cfg, exporterInstance, "target-instance")
+
+		assert.NoError(t, err, "Should not error when no template is used")
+		assert.NotNil(t, result, "Should return an exporter object")
+		assert.Equal(t, "test-exporter", result.Name, "Should preserve original name")
+		assert.Equal(t, map[string]string{
+			"original": "label",
+			"app":      "test",
+		}, result.Labels, "Should preserve original labels")
+		assert.Equal(t, map[string]string{
+			"original": "annotation",
+		}, result.Annotations, "Should preserve original annotations")
+	})
+
+	t.Run("exporter instance checks HasConfigTemplate correctly", func(t *testing.T) {
+		// Test that the function properly uses the HasConfigTemplate method
+		exporterInstanceWithTemplate := &v1alphaConfig.ExporterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-exporter-with-template",
+			},
+			Spec: v1alphaConfig.ExporterInstanceSpec{
+				Username: "test-user",
+				JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
+					Name: "target-instance",
+				},
+				ConfigTemplateRef: v1alphaConfig.ConfigTemplateRef{
+					Name: "some-template",
+				},
+			},
+		}
+
+		exporterInstanceWithoutTemplate := &v1alphaConfig.ExporterInstance{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-exporter-without-template",
+			},
+			Spec: v1alphaConfig.ExporterInstanceSpec{
+				Username: "test-user",
+				JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
+					Name: "target-instance",
+				},
+				// No ConfigTemplateRef
+			},
+		}
+
+		cfg := &config.Config{
+			Loaded: &config.LoadedLabConfig{},
+		}
+
+		// Test with template - should fail in this environment because we can't create a real templater
+		_, err := GetExporterObjectForInstance(cfg, exporterInstanceWithTemplate, "target-instance")
+		assert.Error(t, err, "Should error when trying to create templater without proper config")
+
+		// Test without template - should succeed
+		result, err := GetExporterObjectForInstance(cfg, exporterInstanceWithoutTemplate, "target-instance")
+		assert.NoError(t, err, "Should not error when no template is used")
+		assert.NotNil(t, result, "Should return an exporter object")
 	})
 }
 
