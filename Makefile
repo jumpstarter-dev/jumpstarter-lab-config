@@ -71,7 +71,7 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 
 .PHONY: lint-example-config
 lint-example-config: bin/jumpstarter-lab-config
-	./bin/jumpstarter-lab-config lint example/jumpstarter-lab.yaml
+	ANSIBLE_VAULT_PASSWORD=mypassword ./bin/jumpstarter-lab-config lint example/jumpstarter-lab.yaml
 
 ##@ Build
 clean:
