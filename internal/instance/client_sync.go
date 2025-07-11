@@ -95,8 +95,8 @@ func (i *Instance) updateClient(ctx context.Context, oldClientObj, clientObj *v1
 	// Prepare metadata (annotations, namespace, etc.)
 	// For updates, we want to preserve existing annotations and merge new ones
 	i.prepareMetadata(&updatedClient.ObjectMeta, clientObj.Annotations)
-	i.printDiff(oldClientObj, updatedClient, "client", updatedClient.Name)
-	if i.dryRun {
+	changed := i.checkAndPrintDiff(oldClientObj, updatedClient, "client", updatedClient.Name)
+	if i.dryRun || !changed {
 		return nil
 	}
 

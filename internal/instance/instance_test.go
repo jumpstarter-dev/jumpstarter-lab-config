@@ -8,6 +8,7 @@ import (
 	v1alphaConfig "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -338,7 +339,7 @@ func TestPrintDiff(t *testing.T) {
 		inst, err := NewInstance(instance, validKubeconfig, false, false)
 		if err == nil {
 			// This should not panic and should print a diff
-			inst.printDiff(oldObj, newObj, "exporter", "test-exporter")
+			inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
 		}
 	})
 
@@ -355,8 +356,356 @@ func TestPrintDiff(t *testing.T) {
 		inst, err := NewInstance(instance, validKubeconfig, false, false)
 		if err == nil {
 			// This should not panic and should indicate no changes
-			inst.printDiff(obj, obj, "exporter", "test-exporter")
+			inst.checkAndPrintDiff(obj, obj, "exporter", "test-exporter")
 		}
+	})
+}
+
+var testUsername = "test-user"
+
+func TestCheckAndPrintDiff(t *testing.T) {
+	// Create a test instance to use for the checkAndPrintDiff method
+	instance := &v1alphaConfig.JumpstarterInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-instance",
+		},
+		Spec: v1alphaConfig.JumpstarterInstanceSpec{
+			KubeContext: "test-context",
+			Namespace:   "test-namespace",
+		},
+	}
+
+	// Create an instance for testing
+	inst, err := NewInstance(instance, validKubeconfig, false, false)
+	require.NoError(t, err)
+
+	t.Run("identical objects should return false", func(t *testing.T) {
+		obj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-exporter",
+				Namespace: "test-namespace",
+				Labels: map[string]string{
+					"app": "test",
+				},
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+		}
+
+		changed := inst.checkAndPrintDiff(obj, obj, "exporter", "test-exporter")
+		assert.False(t, changed, "Identical objects should not indicate changes")
+	})
+
+	t.Run("different labels should return true", func(t *testing.T) {
+		oldObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-exporter",
+				Namespace: "test-namespace",
+				Labels: map[string]string{
+					"app": "test",
+				},
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+		}
+
+		newObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-exporter",
+				Namespace: "test-namespace",
+				Labels: map[string]string{
+					"app":       "test",
+					"new-label": "new-value",
+				},
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+		}
+
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		assert.True(t, changed, "Different labels should indicate changes")
+	})
+
+	t.Run("different username should return true", func(t *testing.T) {
+		oldObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-exporter",
+				Namespace: "test-namespace",
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: func() *string { s := "old-user"; return &s }(),
+			},
+		}
+
+		newObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-exporter",
+				Namespace: "test-namespace",
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: func() *string { s := "new-user"; return &s }(),
+			},
+		}
+
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		assert.True(t, changed, "Different username should indicate changes")
+	})
+
+	t.Run("different metadata fields should be ignored", func(t *testing.T) {
+		oldObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "test-exporter",
+				Namespace:         "test-namespace",
+				Generation:        1,
+				ResourceVersion:   "123",
+				UID:               "old-uid",
+				CreationTimestamp: metav1.Now(),
+				ManagedFields: []metav1.ManagedFieldsEntry{
+					{Manager: "old-manager"},
+				},
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+		}
+
+		newObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "test-exporter",
+				Namespace:         "test-namespace",
+				Generation:        2,
+				ResourceVersion:   "456",
+				UID:               "new-uid",
+				CreationTimestamp: metav1.Now(),
+				ManagedFields: []metav1.ManagedFieldsEntry{
+					{Manager: "new-manager"},
+				},
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+		}
+
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		assert.False(t, changed, "Metadata differences should be ignored")
+	})
+
+	t.Run("different status should be ignored", func(t *testing.T) {
+		oldObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-exporter",
+				Namespace: "test-namespace",
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+			Status: v1alpha1.ExporterStatus{
+				Conditions: []metav1.Condition{
+					{Type: "Ready", Status: "False"},
+				},
+			},
+		}
+
+		newObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-exporter",
+				Namespace: "test-namespace",
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+			Status: v1alpha1.ExporterStatus{
+				Conditions: []metav1.Condition{
+					{Type: "Ready", Status: "True"},
+				},
+			},
+		}
+
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		assert.False(t, changed, "Status differences should be ignored")
+	})
+
+	t.Run("different annotations should return true", func(t *testing.T) {
+		oldObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "test-exporter",
+				Namespace:   "test-namespace",
+				Annotations: map[string]string{"old": "annotation"},
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+		}
+
+		newObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "test-exporter",
+				Namespace:   "test-namespace",
+				Annotations: map[string]string{"new": "annotation"},
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+		}
+
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		assert.True(t, changed, "Different annotations should indicate changes")
+	})
+
+	t.Run("nil vs non-nil username should return true", func(t *testing.T) {
+		oldObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-exporter",
+				Namespace: "test-namespace",
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: nil,
+			},
+		}
+
+		newObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-exporter",
+				Namespace: "test-namespace",
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+		}
+
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		assert.True(t, changed, "Nil vs non-nil username should indicate changes")
+	})
+
+	t.Run("different object types should work", func(t *testing.T) {
+		oldClient := &v1alpha1.Client{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-client",
+				Namespace: "test-namespace",
+			},
+		}
+
+		newClient := &v1alpha1.Client{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-client",
+				Namespace: "test-namespace",
+				Labels: map[string]string{
+					"app": "test",
+				},
+			},
+		}
+
+		changed := inst.checkAndPrintDiff(oldClient, newClient, "client", "test-client")
+		assert.True(t, changed, "Different client objects should indicate changes")
+	})
+
+	t.Run("empty vs non-empty labels should return true", func(t *testing.T) {
+		oldObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-exporter",
+				Namespace: "test-namespace",
+				Labels:    map[string]string{},
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+		}
+
+		newObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-exporter",
+				Namespace: "test-namespace",
+				Labels: map[string]string{
+					"app": "test",
+				},
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+		}
+
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		assert.True(t, changed, "Empty vs non-empty labels should indicate changes")
+	})
+
+	t.Run("nil vs empty labels should return true", func(t *testing.T) {
+		oldObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-exporter",
+				Namespace: "test-namespace",
+				Labels:    nil,
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+		}
+
+		newObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-exporter",
+				Namespace: "test-namespace",
+				Labels:    map[string]string{},
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+		}
+
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		assert.True(t, changed, "Nil vs empty labels should indicate changes")
+	})
+
+	t.Run("different namespace should return true", func(t *testing.T) {
+		oldObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-exporter",
+				Namespace: "old-namespace",
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+		}
+
+		newObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-exporter",
+				Namespace: "new-namespace",
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+		}
+
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		assert.True(t, changed, "Different namespace should indicate changes")
+	})
+
+	t.Run("different name should return true", func(t *testing.T) {
+		oldObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "old-exporter",
+				Namespace: "test-namespace",
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+		}
+
+		newObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "new-exporter",
+				Namespace: "test-namespace",
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: &testUsername,
+			},
+		}
+
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		assert.True(t, changed, "Different name should indicate changes")
 	})
 }
 
@@ -383,7 +732,7 @@ func TestGetExporterObjectForInstance(t *testing.T) {
 					Name: "test-exporter",
 				},
 				Spec: v1alphaConfig.ExporterInstanceSpec{
-					Username: "test-user",
+					Username: testUsername,
 					JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
 						Name: "target-instance",
 					},
@@ -402,7 +751,7 @@ func TestGetExporterObjectForInstance(t *testing.T) {
 					},
 				},
 				Spec: v1alpha1.ExporterSpec{
-					Username: func() *string { s := "test-user"; return &s }(),
+					Username: &testUsername,
 				},
 			},
 			expectedError: false,
@@ -417,7 +766,7 @@ func TestGetExporterObjectForInstance(t *testing.T) {
 					},
 				},
 				Spec: v1alphaConfig.ExporterInstanceSpec{
-					Username: "test-user",
+					Username: testUsername,
 					JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
 						Name: "target-instance",
 					},
@@ -438,7 +787,7 @@ func TestGetExporterObjectForInstance(t *testing.T) {
 					Name: "test-exporter",
 				},
 				Spec: v1alphaConfig.ExporterInstanceSpec{
-					Username: "test-user",
+					Username: testUsername,
 					JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
 						Name: "other-instance",
 					},
@@ -455,7 +804,7 @@ func TestGetExporterObjectForInstance(t *testing.T) {
 					Name: "test-exporter",
 				},
 				Spec: v1alphaConfig.ExporterInstanceSpec{
-					Username: "test-user",
+					Username: testUsername,
 					JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
 						Name: "",
 					},
@@ -503,7 +852,7 @@ func TestGetExporterObjectForInstance_WithTemplateProcessing(t *testing.T) {
 				},
 			},
 			Spec: v1alphaConfig.ExporterInstanceSpec{
-				Username: "test-user",
+				Username: testUsername,
 				JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
 					Name: "target-instance",
 				},
@@ -540,7 +889,7 @@ func TestGetExporterObjectForInstance_WithTemplateProcessing(t *testing.T) {
 				Name: "test-exporter-with-template",
 			},
 			Spec: v1alphaConfig.ExporterInstanceSpec{
-				Username: "test-user",
+				Username: testUsername,
 				JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
 					Name: "target-instance",
 				},
@@ -555,7 +904,7 @@ func TestGetExporterObjectForInstance_WithTemplateProcessing(t *testing.T) {
 				Name: "test-exporter-without-template",
 			},
 			Spec: v1alphaConfig.ExporterInstanceSpec{
-				Username: "test-user",
+				Username: testUsername,
 				JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
 					Name: "target-instance",
 				},
