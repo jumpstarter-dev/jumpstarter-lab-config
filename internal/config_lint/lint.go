@@ -64,22 +64,23 @@ func validateTemplates(cfg *config.Config) map[string][]error {
 	for _, exporterInstance := range cfg.Loaded.GetExporterInstances() {
 		// Template validation logic would go here
 		// For now, this is just a placeholder that doesn't report any errors
-		errName := "ExporterInstance:" + exporterInstance.Name
-		et, err := template.NewExporterInstanceTemplater(cfg, exporterInstance)
-		if err != nil {
-			errorsByItem[exporterInstance.Name] = append(errorsByItem[errName], err)
-			continue
-		}
+		if exporterInstance.HasConfigTemplate() {
+			errName := "ExporterInstance:" + exporterInstance.Name
+			et, err := template.NewExporterInstanceTemplater(cfg, exporterInstance)
+			if err != nil {
+				errorsByItem[exporterInstance.Name] = append(errorsByItem[errName], err)
+				continue
+			}
 
-		_, err = et.RenderTemplateLabels()
-		if err != nil {
-			errorsByItem[exporterInstance.Name] = append(errorsByItem[errName+" (labels)"], err)
+			_, err = et.RenderTemplateLabels()
+			if err != nil {
+				errorsByItem[exporterInstance.Name] = append(errorsByItem[errName+" (labels)"], err)
+			}
+			_, err = et.RenderTemplateConfig()
+			if err != nil {
+				errorsByItem[exporterInstance.Name] = append(errorsByItem[errName+" (config)"], err)
+			}
 		}
-		_, err = et.RenderTemplateConfig()
-		if err != nil {
-			errorsByItem[exporterInstance.Name] = append(errorsByItem[errName+" (config)"], err)
-		}
-
 	}
 
 	return errorsByItem

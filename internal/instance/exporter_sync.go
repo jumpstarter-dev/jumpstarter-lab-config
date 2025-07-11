@@ -286,17 +286,22 @@ func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config) (map[s
 func GetExporterObjectForInstance(cfg *config.Config, e *v1alpha1Config.ExporterInstance, jumpstarterInstance string) (*v1alpha1.Exporter, error) {
 	// If this exporter instance is targeting the given jumpstarter instance, return the exporter object
 	if e.Spec.JumpstarterInstanceRef.Name == jumpstarterInstance {
-		// we need to render the exporter instance to get the right labels based on the underlying template
-		et, err := template.NewExporterInstanceTemplater(cfg, e)
-		if err != nil {
-			return nil, fmt.Errorf("error creating ExporterInstanceTemplater for ExporterInstance %s : %w", e.Name, err)
-		}
+		// by default use the exporter instance metadata
 		metadata := e.ObjectMeta.DeepCopy()
-		metadata.Labels, err = et.RenderTemplateLabels()
-		if err != nil {
-			return nil, fmt.Errorf("error rendering labels for ExporterInstance %s : %w", e.Name, err)
-		}
 
+		// but, if the exporter instance has a config template, we need to render
+		// the labels based on the underlying template instead
+		if e.HasConfigTemplate() {
+			et, err := template.NewExporterInstanceTemplater(cfg, e)
+			if err != nil {
+				return nil, fmt.Errorf("error creating ExporterInstanceTemplater for ExporterInstance %s : %w", e.Name, err)
+			}
+			metadata = e.ObjectMeta.DeepCopy()
+			metadata.Labels, err = et.RenderTemplateLabels()
+			if err != nil {
+				return nil, fmt.Errorf("error rendering labels for ExporterInstance %s : %w", e.Name, err)
+			}
+		}
 		return &v1alpha1.Exporter{
 			TypeMeta:   e.TypeMeta,
 			ObjectMeta: *metadata,
