@@ -288,6 +288,7 @@ func GetExporterObjectForInstance(cfg *config.Config, e *v1alpha1Config.Exporter
 	if e.Spec.JumpstarterInstanceRef.Name == jumpstarterInstance {
 		// by default use the exporter instance metadata
 		metadata := e.ObjectMeta.DeepCopy()
+		metadata.Labels = e.Spec.Labels
 
 		// but, if the exporter instance has a config template, we need to render
 		// the labels based on the underlying template instead

@@ -381,14 +381,14 @@ func TestGetExporterObjectForInstance(t *testing.T) {
 			exporterInstance: &v1alphaConfig.ExporterInstance{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-exporter",
-					Labels: map[string]string{
-						"app": "test",
-					},
 				},
 				Spec: v1alphaConfig.ExporterInstanceSpec{
 					Username: "test-user",
 					JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
 						Name: "target-instance",
+					},
+					Labels: map[string]string{
+						"app": "test",
 					},
 					// No ConfigTemplateRef - should use default metadata
 				},
@@ -498,10 +498,6 @@ func TestGetExporterObjectForInstance_WithTemplateProcessing(t *testing.T) {
 		exporterInstance := &v1alphaConfig.ExporterInstance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-exporter",
-				Labels: map[string]string{
-					"original": "label",
-					"app":      "test",
-				},
 				Annotations: map[string]string{
 					"original": "annotation",
 				},
@@ -510,6 +506,10 @@ func TestGetExporterObjectForInstance_WithTemplateProcessing(t *testing.T) {
 				Username: "test-user",
 				JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
 					Name: "target-instance",
+				},
+				Labels: map[string]string{
+					"original": "label",
+					"app":      "test",
 				},
 				// No ConfigTemplateRef
 			},
