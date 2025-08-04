@@ -166,6 +166,12 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 	containerSystemdFile := "/etc/containers/systemd/" + svcName + ".container"
 	exporterConfigFile := "/etc/jumpstarter/exporters/" + svcName + ".yaml"
 
+	// if running docker let's use a traditional systemd service instead of podman quadlet
+	result, _ := m.runCommand("systemctl status docker")
+	if result.ExitCode == 0 {
+		containerSystemdFile = "/etc/systemd/system/" + svcName + ".service"
+	}
+
 	changedSystemd, err := m.reconcileFile(containerSystemdFile, exporterConfig.Spec.SystemdContainerTemplate, dryRun)
 	if err != nil {
 		return fmt.Errorf("failed to reconcile container systemd file: %w", err)
