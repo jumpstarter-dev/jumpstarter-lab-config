@@ -161,20 +161,24 @@ func (m *SSHHostManager) Diff() (string, error) {
 }
 
 func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, dryRun bool) error {
+	// Validate mutual exclusivity: both templates cannot be specified simultaneously
+	if exporterConfig.Spec.SystemdContainerTemplate != "" && exporterConfig.Spec.SystemdServiceTemplate != "" {
+		return fmt.Errorf("both SystemdContainerTemplate and SystemdServiceTemplate specified - only one should be used")
+	}
 
 	svcName := exporterConfig.Spec.ExporterMetadata.Name
 	containerSystemdFile := "/etc/containers/systemd/" + svcName + ".container"
+	serviceSystemdFile := "/etc/systemd/system/" + svcName + ".service"
 	exporterConfigFile := "/etc/jumpstarter/exporters/" + svcName + ".yaml"
 
-	// if running docker let's use a traditional systemd service instead of podman quadlet
-	result, _ := m.runCommand("systemctl status docker")
-	if result.ExitCode == 0 {
-		containerSystemdFile = "/etc/systemd/system/" + svcName + ".service"
-	}
-
-	changedSystemd, err := m.reconcileFile(containerSystemdFile, exporterConfig.Spec.SystemdContainerTemplate, dryRun)
+	changedContainer, err := m.reconcileFile(containerSystemdFile, exporterConfig.Spec.SystemdContainerTemplate, dryRun)
 	if err != nil {
 		return fmt.Errorf("failed to reconcile container systemd file: %w", err)
+	}
+
+	changedService, err := m.reconcileFile(serviceSystemdFile, exporterConfig.Spec.SystemdServiceTemplate, dryRun)
+	if err != nil {
+		return fmt.Errorf("failed to reconcile service systemd file: %w", err)
 	}
 
 	changedExporterConfig, err := m.reconcileFile(exporterConfigFile, exporterConfig.Spec.ConfigTemplate, dryRun)
@@ -183,7 +187,7 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 	}
 
 	// if any of the files changed, reload systemd, enable service and restart the exporter
-	if (changedExporterConfig || changedSystemd) && !dryRun {
+	if (changedExporterConfig || changedContainer || changedService) && !dryRun {
 		_, err := m.runCommand("systemctl daemon-reload")
 		if err != nil {
 			return fmt.Errorf("failed to reload systemd: %w", err)
@@ -232,7 +236,13 @@ func (m *SSHHostManager) reconcileFile(path string, content string, dryRun bool)
 	// Check if file exists and read its content
 	file, err := m.sftpClient.Open(path)
 	if err != nil {
-		// File doesn't exist, we need to create it
+		// File doesn't exist
+		if content == "" {
+			// File doesn't exist and content is empty - nothing to do
+			return false, nil
+		}
+
+		// File doesn't exist and content is not empty - create it
 		if dryRun {
 			fmt.Printf("            📄 Would create file: %s\n", path)
 			return true, nil
@@ -261,7 +271,7 @@ func (m *SSHHostManager) reconcileFile(path string, content string, dryRun bool)
 			return false, fmt.Errorf("failed to write content to %s: %w", path, err)
 		}
 
-		fmt.Printf("Created file: %s\n", path)
+		fmt.Printf("            📄 Created file: %s\n", path)
 		return true, nil
 	}
 
@@ -271,6 +281,20 @@ func (m *SSHHostManager) reconcileFile(path string, content string, dryRun bool)
 	if err != nil {
 		fmt.Printf("Failed to read existing file %s: %v\n", path, err)
 		return false, fmt.Errorf("failed to read existing file %s: %w", path, err)
+	}
+
+	// If content is empty, delete the file
+	if content == "" {
+		if dryRun {
+			fmt.Printf("            🗑️ Would delete file: %s\n", path)
+			return true, nil
+		}
+		err = m.sftpClient.Remove(path)
+		if err != nil {
+			return false, fmt.Errorf("failed to delete file %s: %w", path, err)
+		}
+		fmt.Printf("            🗑️  Deleted file: %s\n", path)
+		return true, nil
 	}
 
 	// Check if content matches
