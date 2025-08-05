@@ -94,8 +94,14 @@ func (e *ExporterHostSyncer) SyncExporterHosts() error {
 			if e.debugConfigs {
 				fmt.Printf("--- 📄 Config Template %s\n", strings.Repeat("─", 40))
 				fmt.Printf("%s\n", tcfg.Spec.ConfigTemplate)
-				fmt.Printf("  - ⚙️  Systemd Container Template %s\n", strings.Repeat("─", 30))
-				fmt.Printf("%s\n", tcfg.Spec.SystemdContainerTemplate)
+				if tcfg.Spec.SystemdContainerTemplate != "" {
+					fmt.Printf("  - ⚙️  Systemd Container Template %s\n", strings.Repeat("─", 30))
+					fmt.Printf("%s\n", tcfg.Spec.SystemdContainerTemplate)
+				}
+				if tcfg.Spec.SystemdServiceTemplate != "" {
+					fmt.Printf("  - 🔧 Systemd Service Template %s\n", strings.Repeat("─", 31))
+					fmt.Printf("%s\n", tcfg.Spec.SystemdServiceTemplate)
+				}
 				fmt.Println(strings.Repeat("─", 60))
 			}
 

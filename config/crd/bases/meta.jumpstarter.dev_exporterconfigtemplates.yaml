@@ -70,6 +70,11 @@ spec:
                   for the systemd container config template.
                 minLength: 1
                 type: string
+              systemdServiceTemplate:
+                description: SystemdServiceTemplate is the raw YAML string content
+                  for the systemd service config template.
+                minLength: 1
+                type: string
             required:
             - configTemplate
             - containerImage
