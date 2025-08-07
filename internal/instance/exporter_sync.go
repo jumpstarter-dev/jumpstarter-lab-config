@@ -66,7 +66,7 @@ func (i *Instance) updateExporter(ctx context.Context, oldExporter, exporter *v1
 
 		// Only print diff on first attempt to avoid spam
 		if attempt == 0 {
-			changed := i.checkAndPrintDiff(oldExporter, updatedExporter, "exporter", updatedExporter.Name)
+			changed := i.checkAndPrintDiff(oldExporter, updatedExporter, "exporter", updatedExporter.Name, i.dryRun)
 			if !changed {
 				return nil
 			}

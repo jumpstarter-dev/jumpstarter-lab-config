@@ -89,7 +89,6 @@ func (e *ExporterHostSyncer) SyncExporterHosts() error {
 			if err != nil {
 				return fmt.Errorf("error rendering template config for %s : %w", errName, err)
 			}
-			fmt.Printf("   	[%s] Rendered config correctly\n", exporterInstance.Name)
 
 			if e.debugConfigs {
 				fmt.Printf("--- 📄 Config Template %s\n", strings.Repeat("─", 40))

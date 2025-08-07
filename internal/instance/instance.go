@@ -159,7 +159,7 @@ func validateInstance(instance *v1alphaConfig.JumpstarterInstance) error {
 }
 
 // checkAndPrintDiff prints a diff between two objects, ignoring Kubernetes metadata fields
-func (i *Instance) checkAndPrintDiff(oldObj, newObj interface{}, objType, objName string) bool {
+func (i *Instance) checkAndPrintDiff(oldObj, newObj interface{}, objType, objName string, dry bool) bool {
 	// Options to ignore Kubernetes metadata fields that change frequently
 	ignoreOpts := []cmp.Option{
 		cmpopts.IgnoreFields(metav1.ObjectMeta{}, "Generation", "CreationTimestamp", "ResourceVersion", "UID", "ManagedFields"),
@@ -168,11 +168,13 @@ func (i *Instance) checkAndPrintDiff(oldObj, newObj interface{}, objType, objNam
 	}
 
 	diff := cmp.Diff(oldObj, newObj, ignoreOpts...)
-	if diff != "" {
-		fmt.Printf("📝 [%s] dry run: Would update %s %s, diff: %s\n", i.config.Name, objType, objName, diff)
-		return true
+	if dry {
+		if diff != "" {
+			fmt.Printf("📝 [%s] dry run: Would update %s %s, diff: %s\n", i.config.Name, objType, objName, diff)
+		} else {
+			fmt.Printf("✅ [%s] dry run: No changes needed for %s %s\n", i.config.Name, objType, objName)
+		}
 	}
 
-	fmt.Printf("✅ [%s] dry run: No changes needed for %s %s\n", i.config.Name, objType, objName)
-	return false
+	return diff != ""
 }

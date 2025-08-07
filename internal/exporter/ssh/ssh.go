@@ -186,20 +186,28 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 		return fmt.Errorf("failed to reconcile exporter config file: %w", err)
 	}
 
-	// if any of the files changed, reload systemd, enable service and restart the exporter
-	if (changedExporterConfig || changedContainer || changedService) && !dryRun {
-		_, err := m.runCommand("systemctl daemon-reload")
-		if err != nil {
-			return fmt.Errorf("failed to reload systemd: %w", err)
+	if changedExporterConfig || changedContainer || changedService {
+		if !dryRun {
+			// Apply the changes: reload systemd, enable service and restart the exporter
+			_, err := m.runCommand("systemctl daemon-reload")
+			if err != nil {
+				return fmt.Errorf("failed to reload systemd: %w", err)
+			}
+			if changedService {
+				_, err = m.runCommand("systemctl enable " + svcName)
+				if err != nil {
+					return fmt.Errorf("failed to enable exporter: %w", err)
+				}
+			}
+			_, err = m.runCommand("systemctl restart " + svcName)
+			if err != nil {
+				return fmt.Errorf("failed to restart exporter: %w", err)
+			}
+			fmt.Printf("            ✅ Exporter service started\n")
 		}
-		_, err = m.runCommand("systemctl start " + svcName)
-		if err != nil {
-			return fmt.Errorf("failed to enable exporter: %w", err)
-		}
-
-		_, err = m.runCommand("systemctl restart " + svcName)
-		if err != nil {
-			return fmt.Errorf("failed to restart exporter: %w", err)
+	} else {
+		if dryRun {
+			fmt.Printf("            ✅ dry run: No changes needed\n")
 		}
 	}
 

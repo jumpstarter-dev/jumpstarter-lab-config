@@ -1,7 +1,10 @@
 package instance
 
 import (
+	"bytes"
 	"context"
+	"io"
+	"os"
 	"testing"
 
 	"github.com/jumpstarter-dev/jumpstarter-controller/api/v1alpha1"
@@ -339,7 +342,7 @@ func TestPrintDiff(t *testing.T) {
 		inst, err := NewInstance(instance, validKubeconfig, false, false)
 		if err == nil {
 			// This should not panic and should print a diff
-			inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+			inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter", true)
 		}
 	})
 
@@ -356,7 +359,7 @@ func TestPrintDiff(t *testing.T) {
 		inst, err := NewInstance(instance, validKubeconfig, false, false)
 		if err == nil {
 			// This should not panic and should indicate no changes
-			inst.checkAndPrintDiff(obj, obj, "exporter", "test-exporter")
+			inst.checkAndPrintDiff(obj, obj, "exporter", "test-exporter", true)
 		}
 	})
 }
@@ -393,7 +396,7 @@ func TestCheckAndPrintDiff(t *testing.T) {
 			},
 		}
 
-		changed := inst.checkAndPrintDiff(obj, obj, "exporter", "test-exporter")
+		changed := inst.checkAndPrintDiff(obj, obj, "exporter", "test-exporter", true)
 		assert.False(t, changed, "Identical objects should not indicate changes")
 	})
 
@@ -425,7 +428,7 @@ func TestCheckAndPrintDiff(t *testing.T) {
 			},
 		}
 
-		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter", true)
 		assert.True(t, changed, "Different labels should indicate changes")
 	})
 
@@ -450,7 +453,7 @@ func TestCheckAndPrintDiff(t *testing.T) {
 			},
 		}
 
-		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter", true)
 		assert.True(t, changed, "Different username should indicate changes")
 	})
 
@@ -489,7 +492,7 @@ func TestCheckAndPrintDiff(t *testing.T) {
 			},
 		}
 
-		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter", true)
 		assert.False(t, changed, "Metadata differences should be ignored")
 	})
 
@@ -524,7 +527,7 @@ func TestCheckAndPrintDiff(t *testing.T) {
 			},
 		}
 
-		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter", true)
 		assert.False(t, changed, "Status differences should be ignored")
 	})
 
@@ -551,7 +554,7 @@ func TestCheckAndPrintDiff(t *testing.T) {
 			},
 		}
 
-		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter", true)
 		assert.True(t, changed, "Different annotations should indicate changes")
 	})
 
@@ -576,7 +579,7 @@ func TestCheckAndPrintDiff(t *testing.T) {
 			},
 		}
 
-		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter", true)
 		assert.True(t, changed, "Nil vs non-nil username should indicate changes")
 	})
 
@@ -598,7 +601,7 @@ func TestCheckAndPrintDiff(t *testing.T) {
 			},
 		}
 
-		changed := inst.checkAndPrintDiff(oldClient, newClient, "client", "test-client")
+		changed := inst.checkAndPrintDiff(oldClient, newClient, "client", "test-client", true)
 		assert.True(t, changed, "Different client objects should indicate changes")
 	})
 
@@ -627,7 +630,7 @@ func TestCheckAndPrintDiff(t *testing.T) {
 			},
 		}
 
-		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter", true)
 		assert.True(t, changed, "Empty vs non-empty labels should indicate changes")
 	})
 
@@ -654,7 +657,7 @@ func TestCheckAndPrintDiff(t *testing.T) {
 			},
 		}
 
-		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter", true)
 		assert.True(t, changed, "Nil vs empty labels should indicate changes")
 	})
 
@@ -679,7 +682,7 @@ func TestCheckAndPrintDiff(t *testing.T) {
 			},
 		}
 
-		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter", true)
 		assert.True(t, changed, "Different namespace should indicate changes")
 	})
 
@@ -704,8 +707,102 @@ func TestCheckAndPrintDiff(t *testing.T) {
 			},
 		}
 
-		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter")
+		changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter", true)
 		assert.True(t, changed, "Different name should indicate changes")
+	})
+
+	t.Run("dry parameter controls printing behavior", func(t *testing.T) {
+		oldObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-exporter",
+				Namespace: "test-namespace",
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: func() *string { s := "old-user"; return &s }(),
+			},
+		}
+
+		newObj := &v1alpha1.Exporter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-exporter",
+				Namespace: "test-namespace",
+			},
+			Spec: v1alpha1.ExporterSpec{
+				Username: func() *string { s := "new-user"; return &s }(),
+			},
+		}
+
+		// Test with dry=false (should not print anything)
+		t.Run("dry=false should not print", func(t *testing.T) {
+			// Capture stdout
+			oldStdout := os.Stdout
+			r, w, _ := os.Pipe()
+			os.Stdout = w
+
+			changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter", false)
+
+			// Restore stdout
+			_ = w.Close()
+			os.Stdout = oldStdout
+
+			// Read captured output
+			var buf bytes.Buffer
+			_, _ = io.Copy(&buf, r)
+			output := buf.String()
+
+			assert.True(t, changed, "Should detect changes")
+			assert.Empty(t, output, "Should not print anything when dry=false")
+		})
+
+		// Test with dry=true (should print diff message)
+		t.Run("dry=true should print diff", func(t *testing.T) {
+			// Capture stdout
+			oldStdout := os.Stdout
+			r, w, _ := os.Pipe()
+			os.Stdout = w
+
+			changed := inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter", true)
+
+			// Restore stdout
+			_ = w.Close()
+			os.Stdout = oldStdout
+
+			// Read captured output
+			var buf bytes.Buffer
+			_, _ = io.Copy(&buf, r)
+			output := buf.String()
+
+			assert.True(t, changed, "Should detect changes")
+			assert.Contains(t, output, "📝", "Should print dry run message with emoji")
+			assert.Contains(t, output, "dry run: Would update", "Should contain dry run message")
+			assert.Contains(t, output, "exporter", "Should mention object type")
+			assert.Contains(t, output, "test-exporter", "Should mention object name")
+		})
+
+		// Test with dry=true and no changes (should print no changes message)
+		t.Run("dry=true with no changes should print no changes message", func(t *testing.T) {
+			// Capture stdout
+			oldStdout := os.Stdout
+			r, w, _ := os.Pipe()
+			os.Stdout = w
+
+			changed := inst.checkAndPrintDiff(oldObj, oldObj, "exporter", "test-exporter", true)
+
+			// Restore stdout
+			_ = w.Close()
+			os.Stdout = oldStdout
+
+			// Read captured output
+			var buf bytes.Buffer
+			_, _ = io.Copy(&buf, r)
+			output := buf.String()
+
+			assert.False(t, changed, "Should not detect changes")
+			assert.Contains(t, output, "✅", "Should print success emoji")
+			assert.Contains(t, output, "dry run: No changes needed", "Should contain no changes message")
+			assert.Contains(t, output, "exporter", "Should mention object type")
+			assert.Contains(t, output, "test-exporter", "Should mention object name")
+		})
 	})
 }
 
