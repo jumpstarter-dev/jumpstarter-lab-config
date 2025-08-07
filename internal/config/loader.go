@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 
 	jsApi "github.com/jumpstarter-dev/jumpstarter-controller/api/v1alpha1"
 	api "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
@@ -95,18 +96,89 @@ func init() {
 	codecFactory = serializer.NewCodecFactory(scheme, serializer.EnableStrict)
 }
 
-// readAndDecodeYAMLFile reads a YAML file and decodes it into a runtime.Object.
-func readAndDecodeYAMLFile(filePath string) (runtime.Object, error) {
+// splitYAMLDocuments splits YAML content by proper document separators (--- at start of line)
+func splitYAMLDocuments(content string) []string {
+	lines := strings.Split(content, "\n")
+	var documents []string
+	var currentDoc strings.Builder
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Check if this line is a document separator (starts with ---)
+		if strings.HasPrefix(trimmed, "---") {
+			// Save current document if it has content
+			if currentDoc.Len() > 0 {
+				documents = append(documents, currentDoc.String())
+				currentDoc.Reset()
+			}
+			continue // Skip the separator line itself
+		}
+
+		// Add line to current document
+		if currentDoc.Len() > 0 {
+			currentDoc.WriteString("\n")
+		}
+		currentDoc.WriteString(line)
+	}
+
+	// Add the last document if it has content
+	if currentDoc.Len() > 0 {
+		documents = append(documents, currentDoc.String())
+	}
+
+	// If no documents were found (no --- separators), return the entire content as one document
+	if len(documents) == 0 {
+		return []string{content}
+	}
+
+	return documents
+}
+
+// readAndDecodeYAMLFile reads a YAML file and decodes it into runtime.Objects.
+// It handles both single-document and multi-document YAML files (separated by ---).
+func readAndDecodeYAMLFile(filePath string) ([]runtime.Object, error) {
 	yamlFile, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("error reading YAML file %s: %w", filePath, err)
 	}
+
+	// Split the file content by --- to handle multi-document YAML
+	// Only split on --- that appear at the beginning of a line (proper YAML document separators)
+	content := string(yamlFile)
+	documents := splitYAMLDocuments(content)
+
+	// Pre-allocate slice with estimated capacity
+	objects := make([]runtime.Object, 0, len(documents))
 	decode := codecFactory.UniversalDeserializer().Decode
-	obj, gvk, err := decode(yamlFile, nil, nil)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding YAML from file %s (GVK: %v): %w", filePath, gvk, err)
+
+	for i, doc := range documents {
+		// For single-document files, preserve original content exactly (no trimming)
+		// For multi-document files, trim each document
+		var docContent string
+		if len(documents) == 1 {
+			// Single document - use original content to preserve exact formatting
+			docContent = doc
+		} else {
+			// Multi-document - trim whitespace from each document
+			trimmed := strings.TrimSpace(doc)
+			if trimmed == "" {
+				continue
+			}
+			docContent = trimmed
+		}
+
+		obj, gvk, err := decode([]byte(docContent), nil, nil)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding YAML document %d from file %s (GVK: %v): %w", i, filePath, gvk, err)
+		}
+		objects = append(objects, obj)
 	}
-	return obj, nil
+
+	if len(objects) == 0 {
+		return nil, fmt.Errorf("no valid YAML documents found in file %s", filePath)
+	}
+
+	return objects, nil
 }
 
 // processResourceGlobs finds files matching a list of glob patterns, decodes them,
@@ -139,39 +211,42 @@ func processResourceGlobs(globPatterns []string, targetMap interface{}, resource
 	expectedMapValueType := mapVal.Type().Elem() // e.g., *api.PhysicalLocation
 
 	for _, filePath := range allFilePaths {
-		obj, err := readAndDecodeYAMLFile(filePath)
+		objects, err := readAndDecodeYAMLFile(filePath)
 		if err != nil {
 			// Stop at first error encountered
 			return fmt.Errorf("processResourceGlob: error processing file %s for %s: %w", filePath, resourceTypeName, err)
 		}
 
-		metaObj, ok := obj.(metav1.Object)
-		if !ok {
-			return fmt.Errorf("processResourceGlob: object from file %s (%T) does not implement metav1.Object, expected for %s", filePath, obj, resourceTypeName)
-		}
-		name := metaObj.GetName()
-		if name == "" {
-			return fmt.Errorf("processResourceGlob: object from file %s for %s is missing metadata.name", filePath, resourceTypeName)
-		}
+		// Process each object in the file (handles both single and multi-document YAML)
+		for docIndex, obj := range objects {
+			metaObj, ok := obj.(metav1.Object)
+			if !ok {
+				return fmt.Errorf("processResourceGlob: object %d from file %s (%T) does not implement metav1.Object, expected for %s", docIndex, filePath, obj, resourceTypeName)
+			}
+			name := metaObj.GetName()
+			if name == "" {
+				return fmt.Errorf("processResourceGlob: object %d from file %s for %s is missing metadata.name", docIndex, filePath, resourceTypeName)
+			}
 
-		objValue := reflect.ValueOf(obj)
-		if !objValue.Type().AssignableTo(expectedMapValueType) {
-			return fmt.Errorf("processResourceGlobs: file %s (name: %s) decoded to type %T, but expected assignable to %s for %s map", filePath, name, obj, expectedMapValueType, resourceTypeName)
-		}
+			objValue := reflect.ValueOf(obj)
+			if !objValue.Type().AssignableTo(expectedMapValueType) {
+				return fmt.Errorf("processResourceGlobs: file %s document %d (name: %s) decoded to type %T, but expected assignable to %s for %s map", filePath, docIndex, name, obj, expectedMapValueType, resourceTypeName)
+			}
 
-		if mapVal.MapIndex(reflect.ValueOf(name)).IsValid() {
-			// Find the original file that contained this duplicate name
-			originalFile := sourceFiles[resourceTypeName][name]
-			return fmt.Errorf("processResourceGlobs: duplicate %s name: '%s' found in file %s (originally defined in %s)", resourceTypeName, name, filePath, originalFile)
-		}
+			if mapVal.MapIndex(reflect.ValueOf(name)).IsValid() {
+				// Find the original file that contained this duplicate name
+				originalFile := sourceFiles[resourceTypeName][name]
+				return fmt.Errorf("processResourceGlobs: duplicate %s name: '%s' found in file %s document %d (originally defined in %s)", resourceTypeName, name, filePath, docIndex, originalFile)
+			}
 
-		// Track the source file for this resource
-		if sourceFiles[resourceTypeName] == nil {
-			sourceFiles[resourceTypeName] = make(map[string]string)
-		}
-		sourceFiles[resourceTypeName][name] = filePath
+			// Track the source file for this resource
+			if sourceFiles[resourceTypeName] == nil {
+				sourceFiles[resourceTypeName] = make(map[string]string)
+			}
+			sourceFiles[resourceTypeName][name] = filePath
 
-		mapVal.SetMapIndex(reflect.ValueOf(name), objValue)
+			mapVal.SetMapIndex(reflect.ValueOf(name), objValue)
+		}
 	}
 	return nil
 }
