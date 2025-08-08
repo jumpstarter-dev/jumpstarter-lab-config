@@ -3,6 +3,7 @@ package instance
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -204,7 +205,7 @@ func (i *Instance) deleteExporter(ctx context.Context, name string) error {
 	return i.client.Delete(ctx, exporter)
 }
 
-func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config) (map[string]template.ServiceParameters, error) {
+func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config, filter *regexp.Regexp) (map[string]template.ServiceParameters, error) {
 	serviceParametersMap := make(map[string]template.ServiceParameters)
 	fmt.Printf("\n🔄 [%s] Syncing exporters ===========================\n\n", i.config.Name)
 	instanceExporters, err := i.listExporters(ctx)
@@ -215,7 +216,6 @@ func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config) (map[s
 	// convert configExporterMap to a map of exporter name to exporter objects
 	configExporterMap := make(map[string]v1alpha1.Exporter)
 	for _, cfgExporterInstance := range cfg.Loaded.ExporterInstances {
-
 		exporterObj, err := GetExporterObjectForInstance(cfg, cfgExporterInstance, i.config.Name)
 		if err != nil {
 			return nil, fmt.Errorf("[%s] failed to get exporter object for instance %s: %w", i.config.Name, cfgExporterInstance.Name, err)
@@ -223,6 +223,25 @@ func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config) (map[s
 		if exporterObj != nil {
 			configExporterMap[cfgExporterInstance.Name] = *exporterObj
 		}
+	}
+
+	// Apply filter if provided
+	if filter != nil {
+		filteredInstanceItems := []v1alpha1.Exporter{}
+		for _, item := range instanceExporters.Items {
+			if filter.MatchString(item.Name) {
+				filteredInstanceItems = append(filteredInstanceItems, item)
+			}
+		}
+		instanceExporters.Items = filteredInstanceItems
+
+		filteredConfigExporterMap := make(map[string]v1alpha1.Exporter)
+		for name, exporterObj := range configExporterMap {
+			if filter.MatchString(name) {
+				filteredConfigExporterMap[name] = exporterObj
+			}
+		}
+		configExporterMap = filteredConfigExporterMap
 	}
 
 	// create a exporterMap from exporters in the cluster
