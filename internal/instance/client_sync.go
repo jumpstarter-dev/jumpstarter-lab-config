@@ -3,13 +3,14 @@ package instance
 import (
 	"context"
 	"fmt"
+	"regexp"
 
 	"github.com/jumpstarter-dev/jumpstarter-controller/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func (i *Instance) SyncClients(ctx context.Context, cfg *config.Config) error {
+func (i *Instance) SyncClients(ctx context.Context, cfg *config.Config, filter *regexp.Regexp) error {
 	fmt.Printf("\n🔄 [%s] Syncing clients ===========================\n\n", i.config.Name)
 	instanceClients, err := i.listClients(ctx)
 	if err != nil {
@@ -17,6 +18,25 @@ func (i *Instance) SyncClients(ctx context.Context, cfg *config.Config) error {
 	}
 
 	configClientMap := cfg.Loaded.Clients
+
+	// Apply filter if provided
+	if filter != nil {
+		filteredInstanceItems := []v1alpha1.Client{}
+		for _, item := range instanceClients.Items {
+			if filter.MatchString(item.Name) {
+				filteredInstanceItems = append(filteredInstanceItems, item)
+			}
+		}
+		instanceClients.Items = filteredInstanceItems
+
+		filteredConfigClientMap := make(map[string]*v1alpha1.Client)
+		for name, clientObj := range configClientMap {
+			if filter.MatchString(name) {
+				filteredConfigClientMap[name] = clientObj
+			}
+		}
+		configClientMap = filteredConfigClientMap
+	}
 
 	// create a clientMap from instanceClients
 	instanceClientMap := make(map[string]v1alpha1.Client)

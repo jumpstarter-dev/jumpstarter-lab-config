@@ -18,8 +18,10 @@ package host
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
+	api "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/exporter/ssh"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/exporter/template"
@@ -32,25 +34,44 @@ type ExporterHostSyncer struct {
 	serviceParametersMap map[string]template.ServiceParameters
 	dryRun               bool
 	debugConfigs         bool
+	exporterFilter       *regexp.Regexp
 }
 
 func NewExporterHostSyncer(cfg *config.Config,
 	tapplier *templating.TemplateApplier,
 	serviceParametersMap map[string]template.ServiceParameters,
-	dryRun, debugConfigs bool) *ExporterHostSyncer {
+	dryRun, debugConfigs bool,
+	exporterFilter *regexp.Regexp) *ExporterHostSyncer {
 	return &ExporterHostSyncer{
 		cfg:                  cfg,
 		tapplier:             tapplier,
 		serviceParametersMap: serviceParametersMap,
 		dryRun:               dryRun,
 		debugConfigs:         debugConfigs,
+		exporterFilter:       exporterFilter,
 	}
 }
 
 // SyncExporterHosts synchronizes exporter hosts via SSH
 func (e *ExporterHostSyncer) SyncExporterHosts() error {
-	fmt.Print("\n🔄 Syncing exporter hosts via SSH ===========================\n\n")
+	fmt.Print("\n🔄 Syncing exporter hosts via SSH ===========================\n")
 	for _, host := range e.cfg.Loaded.ExporterHosts {
+		exporterInstances := e.cfg.Loaded.GetExporterInstancesByExporterHost(host.Name)
+		// Apply filter to exporter instances if provided
+		if e.exporterFilter != nil {
+			filteredInstances := []*api.ExporterInstance{}
+			for _, exporterInstance := range exporterInstances {
+				if e.exporterFilter.MatchString(exporterInstance.Name) {
+					filteredInstances = append(filteredInstances, exporterInstance)
+				}
+			}
+			exporterInstances = filteredInstances
+		}
+		// Skip the host if no exporter instances match the filter
+		if len(exporterInstances) == 0 {
+			continue
+		}
+
 		hostCopy := host.DeepCopy()
 		err := e.tapplier.Apply(hostCopy)
 		if err != nil {
@@ -67,7 +88,6 @@ func (e *ExporterHostSyncer) SyncExporterHosts() error {
 		}
 		fmt.Printf("    Connection status: %s\n", status)
 
-		exporterInstances := e.cfg.Loaded.GetExporterInstancesByExporterHost(host.Name)
 		for _, exporterInstance := range exporterInstances {
 			fmt.Printf("    📟 Exporter instance: %s\n", exporterInstance.Name)
 			errName := "ExporterInstance:" + exporterInstance.Name
