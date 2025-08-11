@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ type HostManager interface {
 	NeedsUpdate() (bool, error)
 	Diff() (string, error)
 	Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, dryRun bool) error
+	RunHostCommand(command string) (*CommandResult, error)
 }
 
 // CommandResult represents the result of running a command via SSH
@@ -166,6 +168,20 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 		return fmt.Errorf("both SystemdContainerTemplate and SystemdServiceTemplate specified - only one should be used")
 	}
 
+	// Helper function to restart service
+	restartService := func(serviceName string, dryRun bool) {
+		if !dryRun {
+			_, enableErr := m.runCommand("systemctl restart " + fmt.Sprintf("%q", serviceName))
+			if enableErr != nil {
+				fmt.Printf("            ❌ Failed to start service %s: %v\n", serviceName, enableErr)
+			} else {
+				fmt.Printf("            ✅ Service %s started\n", serviceName)
+			}
+		} else {
+			fmt.Printf("            📄 Would restart service %s\n", serviceName)
+		}
+	}
+
 	svcName := exporterConfig.Spec.ExporterMetadata.Name
 	containerSystemdFile := "/etc/containers/systemd/" + svcName + ".container"
 	serviceSystemdFile := "/etc/systemd/system/" + svcName + ".service"
@@ -194,24 +210,52 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 				return fmt.Errorf("failed to reload systemd: %w", err)
 			}
 			if changedService {
-				_, err = m.runCommand("systemctl enable " + svcName)
+				_, err = m.runCommand("systemctl enable " + fmt.Sprintf("%q", svcName))
 				if err != nil {
 					return fmt.Errorf("failed to enable exporter: %w", err)
 				}
 			}
-			_, err = m.runCommand("systemctl restart " + svcName)
-			if err != nil {
-				return fmt.Errorf("failed to restart exporter: %w", err)
-			}
-			fmt.Printf("            ✅ Exporter service started\n")
+			restartService(svcName, dryRun)
 		}
 	} else {
-		if dryRun {
-			fmt.Printf("            ✅ dry run: No changes needed\n")
+		// Check if service is running and start if needed
+		statusResult, err := m.runCommand("systemctl is-active " + fmt.Sprintf("%q", svcName))
+		if err != nil || statusResult.Stdout != "active\n" {
+			fmt.Printf("            ⚠️ Service %s is not running...\n", svcName)
+			restartService(svcName, dryRun)
+		}
+
+		// Check if container needs updating using podman auto-update (if podman exists)
+		autoUpdateResult, err := m.runCommand(fmt.Sprintf("command -v podman >/dev/null 2>&1 && podman auto-update --dry-run --format json | jq -r '.[] | select(.ContainerName == %q) | .Updated'", svcName))
+		if err != nil {
+			fmt.Printf("            ℹ️ Podman not available, skipping auto-update check\n")
+		} else {
+			updatedOutput := strings.TrimSpace(autoUpdateResult.Stdout)
+			switch updatedOutput {
+			case "":
+				fmt.Printf("            ⚠️ Container %s not found in auto-update check\n", svcName)
+			case "false":
+				if dryRun {
+					fmt.Printf("            ✅ Exporter container image is up to date\n")
+				}
+			case "true":
+				if dryRun {
+					fmt.Printf("            📄 Would update container %s\n", svcName)
+				} else {
+					restartService(svcName, dryRun)
+				}
+			default:
+				return fmt.Errorf("unexpected auto-update result: %s", updatedOutput)
+			}
 		}
 	}
 
 	return nil
+}
+
+// RunHostCommand implements the HostManager interface by exposing runCommand
+func (m *SSHHostManager) RunHostCommand(command string) (*CommandResult, error) {
+	return m.runCommand(command)
 }
 
 // sanitizeDiff removes sensitive information from diff output
