@@ -52,6 +52,14 @@ func NewExporterHostSyncer(cfg *config.Config,
 	}
 }
 
+// isExporterInstanceDead checks if an exporter instance is marked as dead via annotation
+func isExporterInstanceDead(instance *api.ExporterInstance) (bool, string) {
+	if deadAnnotation, exists := instance.Annotations["dead"]; exists {
+		return true, deadAnnotation
+	}
+	return false, ""
+}
+
 // SyncExporterHosts synchronizes exporter hosts via SSH
 func (e *ExporterHostSyncer) SyncExporterHosts() error {
 	fmt.Print("\n🔄 Syncing exporter hosts via SSH ===========================\n")
@@ -72,6 +80,22 @@ func (e *ExporterHostSyncer) SyncExporterHosts() error {
 			continue
 		}
 
+		// Skip the host if all exporter instances are dead
+		allDead := true
+		var deadAnnotations []string
+		for _, exporterInstance := range exporterInstances {
+			if isDead, deadAnnotation := isExporterInstanceDead(exporterInstance); isDead {
+				deadAnnotations = append(deadAnnotations, fmt.Sprintf("%s: %s", exporterInstance.Name, deadAnnotation))
+			} else {
+				allDead = false
+				break
+			}
+		}
+		if allDead {
+			fmt.Printf("\n💻  Exporter host: %s skipped - all instances dead: [%s]\n", host.Name, strings.Join(deadAnnotations, ", "))
+			continue
+		}
+
 		hostCopy := host.DeepCopy()
 		err := e.tapplier.Apply(hostCopy)
 		if err != nil {
@@ -89,6 +113,10 @@ func (e *ExporterHostSyncer) SyncExporterHosts() error {
 		fmt.Printf("    Connection status: %s\n", status)
 
 		for _, exporterInstance := range exporterInstances {
+			if isDead, deadAnnotation := isExporterInstanceDead(exporterInstance); isDead {
+				fmt.Printf("    📟 Exporter instance: %s skipped - dead: %s\n", exporterInstance.Name, deadAnnotation)
+				continue
+			}
 			fmt.Printf("    📟 Exporter instance: %s\n", exporterInstance.Name)
 			errName := "ExporterInstance:" + exporterInstance.Name
 			et, err := template.NewExporterInstanceTemplater(e.cfg, exporterInstance)
