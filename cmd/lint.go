@@ -33,7 +33,7 @@ var lintCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vaultPassFile, _ := cmd.Flags().GetString("vault-password-file")
 		// Determine config file path
-		configFilePath := "jumpstarter-lab.yaml" // default
+		configFilePath := defaultConfigFile
 		if len(args) > 0 {
 			configFilePath = args[0]
 		}
