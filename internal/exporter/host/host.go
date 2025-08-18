@@ -86,7 +86,41 @@ func (e *ExporterHostSyncer) SyncExporterHosts() error {
 		if err != nil {
 			return fmt.Errorf("error getting status for %s: %w", host.Name, err)
 		}
-		fmt.Printf("    Connection status: %s\n", status)
+		if e.dryRun {
+			fmt.Printf("    ✅ Connection: %s\n", status)
+		}
+
+		// Check if bootc upgrade service is already running
+		serviceStatus, _ := hostSsh.RunHostCommand("systemctl is-active bootc-fetch-apply-updates.service")
+		if serviceStatus != nil {
+			status := strings.TrimSpace(serviceStatus.Stdout)
+			if status == "active" || status == "activating" {
+				fmt.Printf("    ⚠️  Bootc upgrade in progress, skipping exporter instances for this host\n")
+				continue
+			}
+		}
+
+		// Check booted image
+		bootcStdout, err := hostSsh.RunHostCommand("[ -f /run/ostree-booted ] && bootc upgrade --check")
+		if err == nil && bootcStdout != nil && bootcStdout.ExitCode == 0 && bootcStdout.Stdout != "" {
+			if strings.HasPrefix(bootcStdout.Stdout, "No changes") {
+				if e.dryRun {
+					fmt.Printf("    ✅ Bootc image is up to date\n")
+				}
+			} else if e.dryRun {
+				fmt.Printf("    📄 Would upgrade bootc image\n")
+			} else {
+				// Trigger bootc upgrade service now
+				_, err := hostSsh.RunHostCommand("systemctl start --no-block bootc-fetch-apply-updates.service")
+				if err != nil {
+					return fmt.Errorf("error triggering bootc upgrade service: %w", err)
+				}
+				fmt.Printf("    ✅ Bootc upgrade started, skipping exporter instances for this host\n")
+				continue
+			}
+		} else {
+			fmt.Printf("    ℹ️ Not a bootc managed host\n")
+		}
 
 		for _, exporterInstance := range exporterInstances {
 			fmt.Printf("    📟 Exporter instance: %s\n", exporterInstance.Name)
