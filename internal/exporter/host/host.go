@@ -60,52 +60,155 @@ func isExporterInstanceDead(instance *api.ExporterInstance) (bool, string) {
 	return false, ""
 }
 
+// filterExporterInstances filters instances, checks if all are dead, and handles skip printing
+func (e *ExporterHostSyncer) filterExporterInstances(hostName string, exporterInstances []*api.ExporterInstance) []*api.ExporterInstance {
+	// Filter instances based on regex if provided
+	if e.exporterFilter != nil {
+		filteredInstances := make([]*api.ExporterInstance, 0, len(exporterInstances))
+		for _, exporterInstance := range exporterInstances {
+			if e.exporterFilter.MatchString(exporterInstance.Name) {
+				filteredInstances = append(filteredInstances, exporterInstance)
+			}
+		}
+		exporterInstances = filteredInstances
+	}
+
+	// no instances match the filter
+	if len(exporterInstances) == 0 {
+		return nil
+	}
+
+	// Check if all remaining instances are dead
+	allDead := true
+	var deadAnnotations []string
+
+	for _, exporterInstance := range exporterInstances {
+		if isDead, deadAnnotation := isExporterInstanceDead(exporterInstance); isDead {
+			deadAnnotations = append(deadAnnotations, fmt.Sprintf("%s: %s", exporterInstance.Name, deadAnnotation))
+		} else {
+			allDead = false
+			break
+		}
+	}
+
+	// all instances are dead
+	if allDead {
+		fmt.Printf("\n💻  Exporter host: %s skipped - all instances dead: [%s]\n", hostName, strings.Join(deadAnnotations, ", "))
+		return nil
+	}
+
+	return exporterInstances
+}
+
+// handleBootcUpgrade handles bootc upgrade checking and execution
+func (e *ExporterHostSyncer) handleBootcUpgrade(hostSsh ssh.HostManager) (bool, error) {
+	// Check if bootc upgrade service is already running
+	serviceStatus, _ := hostSsh.RunHostCommand("systemctl is-active bootc-fetch-apply-updates.service")
+	if serviceStatus != nil {
+		status := strings.TrimSpace(serviceStatus.Stdout)
+		if status == "active" || status == "activating" {
+			fmt.Printf("    ⚠️  Bootc upgrade in progress, skipping exporter instances for this host\n")
+			return true, nil // skip = true
+		}
+	}
+
+	// Check booted image
+	bootcStdout, err := hostSsh.RunHostCommand("[ -f /run/ostree-booted ] && bootc upgrade --check")
+	if err == nil && bootcStdout != nil && bootcStdout.ExitCode == 0 && bootcStdout.Stdout != "" {
+		if strings.HasPrefix(bootcStdout.Stdout, "No changes") {
+			if e.dryRun {
+				fmt.Printf("    ✅ Bootc image is up to date\n")
+			}
+		} else if e.dryRun {
+			fmt.Printf("    📄 Would upgrade bootc image\n")
+		} else {
+			// Trigger bootc upgrade service now
+			_, err := hostSsh.RunHostCommand("systemctl start --no-block bootc-fetch-apply-updates.service")
+			if err != nil {
+				return false, fmt.Errorf("error triggering bootc upgrade service: %w", err)
+			}
+			fmt.Printf("    ✅ Bootc upgrade started, skipping exporter instances for this host\n")
+			return true, nil // skip = true
+		}
+	} else {
+		fmt.Printf("    ℹ️ Not a bootc managed host\n")
+	}
+	return false, nil // skip = false
+}
+
+// processExporterInstance processes a single exporter instance
+func (e *ExporterHostSyncer) processExporterInstance(exporterInstance *api.ExporterInstance, hostSsh ssh.HostManager) error {
+	if isDead, deadAnnotation := isExporterInstanceDead(exporterInstance); isDead {
+		fmt.Printf("    📟 Exporter instance: %s skipped - dead: %s\n", exporterInstance.Name, deadAnnotation)
+		return nil
+	}
+
+	fmt.Printf("    📟 Exporter instance: %s\n", exporterInstance.Name)
+	errName := "ExporterInstance:" + exporterInstance.Name
+
+	et, err := template.NewExporterInstanceTemplater(e.cfg, exporterInstance)
+	if err != nil {
+		return fmt.Errorf("error creating ExporterInstanceTemplater for %s : %w", errName, err)
+	}
+
+	serviceParameters, ok := e.serviceParametersMap[exporterInstance.Name]
+	if !ok {
+		return fmt.Errorf("service parameters not found for %s", exporterInstance.Name)
+	}
+	et.SetServiceParameters(serviceParameters)
+
+	_, err = et.RenderTemplateLabels()
+	if err != nil {
+		return fmt.Errorf("error creating ExporterInstanceTemplater for %s : %w", errName, err)
+	}
+
+	tcfg, err := et.RenderTemplateConfig()
+	if err != nil {
+		return fmt.Errorf("error rendering template config for %s : %w", errName, err)
+	}
+
+	if e.debugConfigs {
+		fmt.Printf("--- 📄 Config Template %s\n", strings.Repeat("─", 40))
+		fmt.Printf("%s\n", tcfg.Spec.ConfigTemplate)
+		if tcfg.Spec.SystemdContainerTemplate != "" {
+			fmt.Printf("  - ⚙️  Systemd Container Template %s\n", strings.Repeat("─", 30))
+			fmt.Printf("%s\n", tcfg.Spec.SystemdContainerTemplate)
+		}
+		if tcfg.Spec.SystemdServiceTemplate != "" {
+			fmt.Printf("  - 🔧 Systemd Service Template %s\n", strings.Repeat("─", 31))
+			fmt.Printf("%s\n", tcfg.Spec.SystemdServiceTemplate)
+		}
+		fmt.Println(strings.Repeat("─", 60))
+	}
+
+	return hostSsh.Apply(tcfg, e.dryRun)
+}
+
 // SyncExporterHosts synchronizes exporter hosts via SSH
 func (e *ExporterHostSyncer) SyncExporterHosts() error {
 	fmt.Print("\n🔄 Syncing exporter hosts via SSH ===========================\n")
+
 	for _, host := range e.cfg.Loaded.ExporterHosts {
 		exporterInstances := e.cfg.Loaded.GetExporterInstancesByExporterHost(host.Name)
-		// Apply filter to exporter instances if provided
-		if e.exporterFilter != nil {
-			filteredInstances := []*api.ExporterInstance{}
-			for _, exporterInstance := range exporterInstances {
-				if e.exporterFilter.MatchString(exporterInstance.Name) {
-					filteredInstances = append(filteredInstances, exporterInstance)
-				}
-			}
-			exporterInstances = filteredInstances
-		}
-		// Skip the host if no exporter instances match the filter
+		exporterInstances = e.filterExporterInstances(host.Name, exporterInstances)
+
+		// Skip the host if no viable exporter instances remain
 		if len(exporterInstances) == 0 {
 			continue
 		}
 
-		// Skip the host if all exporter instances are dead
-		allDead := true
-		var deadAnnotations []string
-		for _, exporterInstance := range exporterInstances {
-			if isDead, deadAnnotation := isExporterInstanceDead(exporterInstance); isDead {
-				deadAnnotations = append(deadAnnotations, fmt.Sprintf("%s: %s", exporterInstance.Name, deadAnnotation))
-			} else {
-				allDead = false
-				break
-			}
-		}
-		if allDead {
-			fmt.Printf("\n💻  Exporter host: %s skipped - all instances dead: [%s]\n", host.Name, strings.Join(deadAnnotations, ", "))
-			continue
-		}
-
 		hostCopy := host.DeepCopy()
-		err := e.tapplier.Apply(hostCopy)
-		if err != nil {
+		if err := e.tapplier.Apply(hostCopy); err != nil {
 			return fmt.Errorf("error applying template for %s: %w", host.Name, err)
 		}
+
 		fmt.Printf("\n💻  Exporter host: %s\n", hostCopy.Spec.Addresses[0])
+
 		hostSsh, err := ssh.NewSSHHostManager(hostCopy)
 		if err != nil {
 			return fmt.Errorf("error creating SSH host manager for %s: %w", host.Name, err)
 		}
+
 		status, err := hostSsh.Status()
 		if err != nil {
 			return fmt.Errorf("error getting status for %s: %w", host.Name, err)
@@ -114,83 +217,19 @@ func (e *ExporterHostSyncer) SyncExporterHosts() error {
 			fmt.Printf("    ✅ Connection: %s\n", status)
 		}
 
-		// Check if bootc upgrade service is already running
-		serviceStatus, _ := hostSsh.RunHostCommand("systemctl is-active bootc-fetch-apply-updates.service")
-		if serviceStatus != nil {
-			status := strings.TrimSpace(serviceStatus.Stdout)
-			if status == "active" || status == "activating" {
-				fmt.Printf("    ⚠️  Bootc upgrade in progress, skipping exporter instances for this host\n")
-				continue
-			}
+		if skip, err := e.handleBootcUpgrade(hostSsh); err != nil {
+			return err
+		} else if skip {
+			continue
 		}
 
-		// Check booted image
-		bootcStdout, err := hostSsh.RunHostCommand("[ -f /run/ostree-booted ] && bootc upgrade --check")
-		if err == nil && bootcStdout != nil && bootcStdout.ExitCode == 0 && bootcStdout.Stdout != "" {
-			if strings.HasPrefix(bootcStdout.Stdout, "No changes") {
-				if e.dryRun {
-					fmt.Printf("    ✅ Bootc image is up to date\n")
-				}
-			} else if e.dryRun {
-				fmt.Printf("    📄 Would upgrade bootc image\n")
-			} else {
-				// Trigger bootc upgrade service now
-				_, err := hostSsh.RunHostCommand("systemctl start --no-block bootc-fetch-apply-updates.service")
-				if err != nil {
-					return fmt.Errorf("error triggering bootc upgrade service: %w", err)
-				}
-				fmt.Printf("    ✅ Bootc upgrade started, skipping exporter instances for this host\n")
-				continue
-			}
-		} else {
-			fmt.Printf("    ℹ️ Not a bootc managed host\n")
-		}
-
+		// Process each exporter instance
 		for _, exporterInstance := range exporterInstances {
-			if isDead, deadAnnotation := isExporterInstanceDead(exporterInstance); isDead {
-				fmt.Printf("    📟 Exporter instance: %s skipped - dead: %s\n", exporterInstance.Name, deadAnnotation)
-				continue
-			}
-			fmt.Printf("    📟 Exporter instance: %s\n", exporterInstance.Name)
-			errName := "ExporterInstance:" + exporterInstance.Name
-			et, err := template.NewExporterInstanceTemplater(e.cfg, exporterInstance)
-			serviceParameters, ok := e.serviceParametersMap[exporterInstance.Name]
-			if !ok {
-				return fmt.Errorf("service parameters not found for %s", exporterInstance.Name)
-			}
-			et.SetServiceParameters(serviceParameters)
-			if err != nil {
-				return fmt.Errorf("error creating ExporterInstanceTemplater for %s : %w", errName, err)
-			}
-
-			_, err = et.RenderTemplateLabels()
-			if err != nil {
-				return fmt.Errorf("error creating ExporterInstanceTemplater for %s : %w", errName, err)
-			}
-			tcfg, err := et.RenderTemplateConfig()
-			if err != nil {
-				return fmt.Errorf("error rendering template config for %s : %w", errName, err)
-			}
-
-			if e.debugConfigs {
-				fmt.Printf("--- 📄 Config Template %s\n", strings.Repeat("─", 40))
-				fmt.Printf("%s\n", tcfg.Spec.ConfigTemplate)
-				if tcfg.Spec.SystemdContainerTemplate != "" {
-					fmt.Printf("  - ⚙️  Systemd Container Template %s\n", strings.Repeat("─", 30))
-					fmt.Printf("%s\n", tcfg.Spec.SystemdContainerTemplate)
-				}
-				if tcfg.Spec.SystemdServiceTemplate != "" {
-					fmt.Printf("  - 🔧 Systemd Service Template %s\n", strings.Repeat("─", 31))
-					fmt.Printf("%s\n", tcfg.Spec.SystemdServiceTemplate)
-				}
-				fmt.Println(strings.Repeat("─", 60))
-			}
-
-			if err := hostSsh.Apply(tcfg, e.dryRun); err != nil {
+			if err := e.processExporterInstance(exporterInstance, hostSsh); err != nil {
 				return fmt.Errorf("error applying exporter config for %s: %w", exporterInstance.Name, err)
 			}
-
 		}
 	}
+
 	return nil
 }
