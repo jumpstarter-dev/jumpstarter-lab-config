@@ -238,7 +238,7 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 				if dryRun {
 					fmt.Printf("            ✅ Exporter container image is up to date\n")
 				}
-			case "true":
+			case "pending":
 				if dryRun {
 					fmt.Printf("            📄 Would update container %s\n", svcName)
 				} else {
