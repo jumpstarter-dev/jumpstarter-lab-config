@@ -45,7 +45,7 @@ var applyCmd = &cobra.Command{
 		filterExporters, _ := cmd.Flags().GetString("filter-exporters")
 
 		// Determine config file path
-		configFilePath := "jumpstarter-lab.yaml" // default
+		configFilePath := defaultConfigFile
 		if len(args) > 0 {
 			configFilePath = args[0]
 		}

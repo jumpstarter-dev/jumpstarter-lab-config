@@ -37,6 +37,8 @@ var (
 	scheme = runtime.NewScheme()
 )
 
+const defaultConfigFile = "jumpstarter-lab.yaml"
+
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(metav1alpha1.AddToScheme(scheme))
