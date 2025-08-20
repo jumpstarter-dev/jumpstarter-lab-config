@@ -103,10 +103,12 @@ func (e *ExporterHostSyncer) filterExporterInstances(hostName string, exporterIn
 // handleBootcUpgrade handles bootc upgrade checking and execution
 func (e *ExporterHostSyncer) handleBootcUpgrade(hostSsh ssh.HostManager) (bool, error) {
 	// Check if bootc upgrade service is already running
-	serviceStatus, _ := hostSsh.RunHostCommand("systemctl is-active bootc-fetch-apply-updates.service")
-	if serviceStatus != nil {
-		status := strings.TrimSpace(serviceStatus.Stdout)
-		if status == "active" || status == "activating" {
+	statusCmd, _ := hostSsh.RunHostCommand("systemctl is-active bootc-fetch-apply-updates.service bootc-fetch-apply-updates.timer")
+	if statusCmd != nil {
+		statuses := strings.Fields(statusCmd.Stdout)
+		if len(statuses) == 2 &&
+			(statuses[0] == "active" || statuses[0] == "activating" ||
+				statuses[1] == "active" || statuses[1] == "activating") {
 			fmt.Printf("    ⚠️  Bootc upgrade in progress, skipping exporter instances for this host\n")
 			return true, nil // skip = true
 		}
@@ -122,8 +124,8 @@ func (e *ExporterHostSyncer) handleBootcUpgrade(hostSsh ssh.HostManager) (bool, 
 		} else if e.dryRun {
 			fmt.Printf("    📄 Would upgrade bootc image\n")
 		} else {
-			// Trigger bootc upgrade service now
-			_, err := hostSsh.RunHostCommand("systemctl start --no-block bootc-fetch-apply-updates.service")
+			// Trigger bootc upgrade timer now. Assuming it uses manual activation (e.g. OnActiveSec=0, RandomizedDelaySec=1h, RemainAfterElapse=false)
+			_, err := hostSsh.RunHostCommand("systemctl restart bootc-fetch-apply-updates.timer")
 			if err != nil {
 				return false, fmt.Errorf("error triggering bootc upgrade service: %w", err)
 			}
