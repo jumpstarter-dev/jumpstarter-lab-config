@@ -18,8 +18,10 @@ package host
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
+	"time"
 
 	api "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
@@ -28,6 +30,24 @@ import (
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/templating"
 )
 
+// RetryItem represents a failed exporter instance that needs to be retried
+type RetryItem struct {
+	ExporterInstance *api.ExporterInstance
+	HostSSH          ssh.HostManager
+	HostName         string
+	Attempts         int
+	LastError        error
+	LastAttemptTime  time.Time
+}
+
+// RetryConfig holds configuration for the retry mechanism
+type RetryConfig struct {
+	MaxAttempts       int           // Maximum number of retry attempts
+	BaseDelay         time.Duration // Base delay for exponential backoff
+	MaxDelay          time.Duration // Maximum delay cap
+	BackoffMultiplier float64       // Multiplier for exponential backoff
+}
+
 type ExporterHostSyncer struct {
 	cfg                  *config.Config
 	tapplier             *templating.TemplateApplier
@@ -35,6 +55,7 @@ type ExporterHostSyncer struct {
 	dryRun               bool
 	debugConfigs         bool
 	exporterFilter       *regexp.Regexp
+	retryConfig          RetryConfig
 }
 
 func NewExporterHostSyncer(cfg *config.Config,
@@ -49,6 +70,12 @@ func NewExporterHostSyncer(cfg *config.Config,
 		dryRun:               dryRun,
 		debugConfigs:         debugConfigs,
 		exporterFilter:       exporterFilter,
+		retryConfig: RetryConfig{
+			MaxAttempts:       3,
+			BaseDelay:         5 * time.Second,
+			MaxDelay:          60 * time.Second,
+			BackoffMultiplier: 2.0,
+		},
 	}
 }
 
@@ -186,10 +213,123 @@ func (e *ExporterHostSyncer) processExporterInstance(exporterInstance *api.Expor
 	return hostSsh.Apply(tcfg, e.dryRun)
 }
 
+// calculateBackoffDelay calculates the delay for exponential backoff
+func (e *ExporterHostSyncer) calculateBackoffDelay(attempts int) time.Duration {
+	delay := time.Duration(float64(e.retryConfig.BaseDelay) * math.Pow(e.retryConfig.BackoffMultiplier, float64(attempts)))
+	if delay > e.retryConfig.MaxDelay {
+		delay = e.retryConfig.MaxDelay
+	}
+	return delay
+}
+
+// processExporterInstances processes exporter instances and adds failures to global retry queue
+func (e *ExporterHostSyncer) processExporterInstances(exporterInstances []*api.ExporterInstance, hostSsh ssh.HostManager, hostName string, retryQueue *[]RetryItem) {
+	for _, exporterInstance := range exporterInstances {
+		if err := e.processExporterInstance(exporterInstance, hostSsh); err != nil {
+			fmt.Printf("    ❌ Failed to process %s: %v\n", exporterInstance.Name, err)
+			*retryQueue = append(*retryQueue, RetryItem{
+				ExporterInstance: exporterInstance,
+				HostSSH:          hostSsh,
+				HostName:         hostName,
+				Attempts:         1,
+				LastError:        err,
+				LastAttemptTime:  time.Now(),
+			})
+		}
+	}
+}
+
+// processGlobalRetryQueue processes the global retry queue with exponential backoff
+func (e *ExporterHostSyncer) processGlobalRetryQueue(retryQueue []RetryItem) error {
+	var finalErrors []string
+
+	for len(retryQueue) > 0 {
+		var nextRetryQueue []RetryItem
+		var itemsToRetry []RetryItem
+
+		// First pass: separate items that are ready to retry from those that need to wait
+		for _, retryItem := range retryQueue {
+			// Check if we've exceeded max attempts
+			if retryItem.Attempts >= e.retryConfig.MaxAttempts {
+				fmt.Printf("💀 Max retry attempts exceeded for %s on %s, giving up: %v\n",
+					retryItem.ExporterInstance.Name, retryItem.HostName, retryItem.LastError)
+				finalErrors = append(finalErrors, fmt.Sprintf("%s on %s: %v", retryItem.ExporterInstance.Name, retryItem.HostName, retryItem.LastError))
+				continue
+			}
+
+			// Calculate delay since last attempt
+			timeSinceLastAttempt := time.Since(retryItem.LastAttemptTime)
+			requiredDelay := e.calculateBackoffDelay(retryItem.Attempts - 1)
+
+			// If not enough time has passed, add to next retry queue
+			if timeSinceLastAttempt < requiredDelay {
+				nextRetryQueue = append(nextRetryQueue, retryItem)
+			} else {
+				// Ready to retry
+				itemsToRetry = append(itemsToRetry, retryItem)
+			}
+		}
+
+		// Second pass: retry items that are ready
+		for _, retryItem := range itemsToRetry {
+			fmt.Printf("🔄 Retrying %s on %s (attempt %d/%d)...\n",
+				retryItem.ExporterInstance.Name, retryItem.HostName, retryItem.Attempts+1, e.retryConfig.MaxAttempts)
+
+			if err := e.processExporterInstance(retryItem.ExporterInstance, retryItem.HostSSH); err != nil {
+				// Still failed, increment attempts and add to next retry queue
+				retryItem.Attempts++
+				retryItem.LastError = err
+				retryItem.LastAttemptTime = time.Now()
+				nextRetryQueue = append(nextRetryQueue, retryItem)
+				fmt.Printf("❌ Retry failed for %s on %s: %v\n", retryItem.ExporterInstance.Name, retryItem.HostName, err)
+			} else {
+				fmt.Printf("✅ Retry succeeded for %s on %s\n", retryItem.ExporterInstance.Name, retryItem.HostName)
+			}
+		}
+
+		retryQueue = nextRetryQueue
+
+		// If there are still items to retry, wait before the next iteration
+		if len(retryQueue) > 0 {
+			// Find the minimum delay needed for the next retry
+			minDelay := e.retryConfig.MaxDelay
+			for _, item := range retryQueue {
+				requiredDelay := e.calculateBackoffDelay(item.Attempts - 1)
+				timeSinceLastAttempt := time.Since(item.LastAttemptTime)
+				remainingDelay := requiredDelay - timeSinceLastAttempt
+				if remainingDelay < minDelay {
+					minDelay = remainingDelay
+				}
+			}
+
+			if minDelay > 0 {
+				// Round to nearest second to avoid decimal display
+				roundedDelay := time.Duration(int64(minDelay.Seconds())) * time.Second
+				if roundedDelay == 0 && minDelay > 0 {
+					roundedDelay = 1 * time.Second
+				}
+				fmt.Printf("⏳ Waiting %v before next retry cycle...\n", roundedDelay)
+				time.Sleep(roundedDelay + 1*time.Second)
+			}
+		}
+	}
+
+	// Return error if any instances failed after all retries
+	if len(finalErrors) > 0 {
+		return fmt.Errorf("failed to process exporter instances after retries: %s", strings.Join(finalErrors, "; "))
+	}
+
+	return nil
+}
+
 // SyncExporterHosts synchronizes exporter hosts via SSH
 func (e *ExporterHostSyncer) SyncExporterHosts() error {
 	fmt.Print("\n🔄 Syncing exporter hosts via SSH ===========================\n")
 
+	// Global retry queue to collect all failed instances
+	retryQueue := make([]RetryItem, 0)
+
+	// First pass: process all hosts and collect failures
 	for _, host := range e.cfg.Loaded.ExporterHosts {
 		exporterInstances := e.cfg.Loaded.GetExporterInstancesByExporterHost(host.Name)
 		exporterInstances = e.filterExporterInstances(host.Name, exporterInstances)
@@ -225,11 +365,15 @@ func (e *ExporterHostSyncer) SyncExporterHosts() error {
 			continue
 		}
 
-		// Process each exporter instance
-		for _, exporterInstance := range exporterInstances {
-			if err := e.processExporterInstance(exporterInstance, hostSsh); err != nil {
-				return fmt.Errorf("error applying exporter config for %s: %w", exporterInstance.Name, err)
-			}
+		// Process each exporter instance and add failures to global retry queue
+		e.processExporterInstances(exporterInstances, hostSsh, host.Name, &retryQueue)
+	}
+
+	// Second pass: retry all failed instances globally
+	if len(retryQueue) > 0 {
+		fmt.Printf("\n🔄 Processing retry queue (%d failed instances) ===========================\n", len(retryQueue))
+		if err := e.processGlobalRetryQueue(retryQueue); err != nil {
+			return fmt.Errorf("error syncing exporter hosts: %w", err)
 		}
 	}
 

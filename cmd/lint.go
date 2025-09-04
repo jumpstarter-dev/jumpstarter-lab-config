@@ -26,10 +26,11 @@ import (
 )
 
 var lintCmd = &cobra.Command{
-	Use:   "lint [config-file]",
-	Short: "Validate configuration files",
-	Long:  `Lint and validate configuration files to ensure they are valid and follow the expected format.`,
-	Args:  cobra.MaximumNArgs(1),
+	Use:          "lint [config-file]",
+	Short:        "Validate configuration files",
+	Long:         `Lint and validate configuration files to ensure they are valid and follow the expected format.`,
+	Args:         cobra.MaximumNArgs(1),
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vaultPassFile, _ := cmd.Flags().GetString("vault-password-file")
 		// Determine config file path

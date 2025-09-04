@@ -38,7 +38,8 @@ var docsCmd = &cobra.Command{
 	Short: "Generate documentation for configured DUTs",
 	Long: `Generate markdown documentation table for all Device Under Test (DUT) boards with location and ` +
 		`status information. You do not need vault password file when all the fields in the output are not encrypted.`,
-	Args: cobra.MaximumNArgs(1),
+	Args:         cobra.MaximumNArgs(1),
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vaultPassFile, _ := cmd.Flags().GetString("vault-password-file")
 		outFile, _ := cmd.Flags().GetString("out")
