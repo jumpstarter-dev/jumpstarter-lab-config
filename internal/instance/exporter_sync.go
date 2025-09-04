@@ -205,6 +205,56 @@ func (i *Instance) deleteExporter(ctx context.Context, name string) error {
 	return i.client.Delete(ctx, exporter)
 }
 
+// formatCredentialsYAML formats credentials in YAML format for easy copy&paste
+func (i *Instance) formatCredentialsYAML(exporterName string, serviceParameters *template.ServiceParameters, cfg *config.Config) (string, error) {
+	// Get the gRPC endpoint
+	endpoint, err := i.getGrpcEndpoint(exporterName, cfg)
+	if err != nil {
+		return "", err
+	}
+
+	// Build YAML output
+	yaml := fmt.Sprintf("endpoint: \"%s\"\n", endpoint)
+
+	// Always add TLS section
+	if serviceParameters.TlsCA != "" {
+		yaml += fmt.Sprintf("tls:\n  ca: \"%s\"\n", serviceParameters.TlsCA)
+	} else {
+		yaml += "tls:\n  ca: \"\"\n  insecure: true\n"
+	}
+
+	yaml += fmt.Sprintf("token: \"%s\"", serviceParameters.Token)
+
+	return yaml, nil
+}
+
+// getGrpcEndpoint gets the gRPC endpoint for an exporter from its jumpstarter instance
+func (i *Instance) getGrpcEndpoint(exporterName string, cfg *config.Config) (string, error) {
+	// Find the exporter instance in the config
+	for _, exporterInstance := range cfg.Loaded.ExporterInstances {
+		if exporterInstance.Name == exporterName {
+			// Get the jumpstarter instance name
+			jumpstarterInstanceName := exporterInstance.Spec.JumpstarterInstanceRef.Name
+			if jumpstarterInstanceName == "" {
+				return "", fmt.Errorf("exporter %s has no jumpstarter instance reference", exporterName)
+			}
+
+			// Look up the jumpstarter instance
+			jumpstarterInstance, exists := cfg.Loaded.GetJumpstarterInstances()[jumpstarterInstanceName]
+			if !exists {
+				return "", fmt.Errorf("jumpstarter instance %s not found for exporter %s", jumpstarterInstanceName, exporterName)
+			}
+
+			// Return the first endpoint if available
+			if len(jumpstarterInstance.Spec.Endpoints) > 0 {
+				return jumpstarterInstance.Spec.Endpoints[0], nil
+			}
+			return "", fmt.Errorf("jumpstarter instance %s has no endpoints for exporter %s", jumpstarterInstanceName, exporterName)
+		}
+	}
+	return "", fmt.Errorf("exporter instance %s not found in config", exporterName)
+}
+
 func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config, filter *regexp.Regexp) (map[string]template.ServiceParameters, error) {
 	serviceParametersMap := make(map[string]template.ServiceParameters)
 	fmt.Printf("\n🔄 [%s] Syncing exporters ===========================\n\n", i.config.Name)
@@ -262,27 +312,38 @@ func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config, filter
 
 	// create exporters that are in config but not in instance
 	for _, cfgExporter := range configExporterMap {
-		// Use the helper method to get the Exporter object for this instance
-
 		if _, ok := instanceExporterMap[cfgExporter.Name]; !ok {
+			// This is a new exporter - create it
 			err := i.createExporter(ctx, &cfgExporter)
 			if err != nil {
 				return nil, fmt.Errorf("[%s] failed to create exporter %s: %w", i.config.Name, cfgExporter.Name, err)
 			}
-		}
-		var serviceParameters *template.ServiceParameters
-		if !i.dryRun {
-			serviceParameters, err = i.waitExporterCredentials(ctx, &cfgExporter)
-			if err != nil {
-				return nil, fmt.Errorf("[%s] failed to wait for exporter credentials for %s: %w", i.config.Name, cfgExporter.Name, err)
+
+			var serviceParameters *template.ServiceParameters
+			if !i.dryRun {
+				serviceParameters, err = i.waitExporterCredentials(ctx, &cfgExporter)
+				if err != nil {
+					return nil, fmt.Errorf("[%s] failed to wait for exporter credentials for %s: %w", i.config.Name, cfgExporter.Name, err)
+				}
+			} else {
+				serviceParameters = &template.ServiceParameters{
+					Token: "dry-run",
+					TlsCA: "",
+				}
 			}
-		} else {
-			serviceParameters = &template.ServiceParameters{
-				Token: "dry-run",
-				TlsCA: "",
+
+			// Print credentials when flag is set, or for new non-managed exporters (not in dry run)
+			if i.printCredentials || (!i.dryRun && cfg.Loaded.ExporterInstances[cfgExporter.Name] != nil &&
+				cfg.Loaded.ExporterInstances[cfgExporter.Name].Spec.ExporterHostRef.Name == "") {
+				yamlOutput, err := i.formatCredentialsYAML(cfgExporter.Name, serviceParameters, cfg)
+				if err != nil {
+					return nil, fmt.Errorf("[%s] failed to format credentials for exporter %s: %w", i.config.Name, cfgExporter.Name, err)
+				}
+				fmt.Printf("🔍 [%s] Exporter connection details snippet for exporter %s:\n%s\n", i.config.Name, cfgExporter.Name, yamlOutput)
 			}
+
+			serviceParametersMap[cfgExporter.Name] = *serviceParameters
 		}
-		serviceParametersMap[cfgExporter.Name] = *serviceParameters
 	}
 
 	// update exporters that are in both config and instance
@@ -297,6 +358,13 @@ func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config, filter
 			serviceParameters, err := i.waitExporterCredentials(ctx, &exporterObj)
 			if err != nil {
 				return nil, fmt.Errorf("[%s] failed to wait for exporter credentials for %s: %w", i.config.Name, exporterObj.Name, err)
+			}
+			if i.printCredentials {
+				yamlOutput, err := i.formatCredentialsYAML(exporterObj.Name, serviceParameters, cfg)
+				if err != nil {
+					return nil, fmt.Errorf("[%s] failed to format credentials for exporter %s: %w", i.config.Name, exporterObj.Name, err)
+				}
+				fmt.Printf("🔍 [%s] Exporter connection details snippet for exporter %s:\n%s\n", i.config.Name, exporterObj.Name, yamlOutput)
 			}
 			serviceParametersMap[exporterObj.Name] = *serviceParameters
 		}
