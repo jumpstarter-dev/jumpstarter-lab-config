@@ -28,7 +28,7 @@ func TestNewInstance(t *testing.T) {
 
 	t.Run("with kubeconfig string", func(t *testing.T) {
 		// This will likely fail since we don't have a real kubeconfig, but we test the flow
-		_, err := NewInstance(instance, validKubeconfig, false, false)
+		_, err := NewInstance(instance, validKubeconfig, false, false, false)
 		// We expect this to fail since the context doesn't exist in our test kubeconfig
 		if err != nil {
 			assert.Contains(t, err.Error(), "context test-context does not exist in kubeconfig")
@@ -37,7 +37,7 @@ func TestNewInstance(t *testing.T) {
 
 	t.Run("without kubeconfig string", func(t *testing.T) {
 		// This will likely fail since we don't have a real kubeconfig file, but we test the flow
-		_, err := NewInstance(instance, "", false, false)
+		_, err := NewInstance(instance, "", false, false, false)
 		// We expect this to fail since the context doesn't exist in the default kubeconfig
 		if err != nil {
 			assert.True(t,
@@ -60,7 +60,7 @@ func TestNewInstance(t *testing.T) {
 			},
 		}
 
-		_, err := NewInstance(instanceNoContext, validKubeconfig, false, false)
+		_, err := NewInstance(instanceNoContext, validKubeconfig, false, false, false)
 		// This should work with our test kubeconfig since it uses the default context
 		if err != nil {
 			assert.True(t,
@@ -85,7 +85,7 @@ func TestInstanceMethods(t *testing.T) {
 
 	t.Run("GetClient and GetConfig", func(t *testing.T) {
 		// This will likely fail, but we test the method signatures
-		inst, err := NewInstance(instance, validKubeconfig, false, false)
+		inst, err := NewInstance(instance, validKubeconfig, false, false, false)
 		if err == nil {
 			// If it succeeds, test the methods
 			client := inst.GetClient()
@@ -110,7 +110,7 @@ func TestInstanceExporterMethods(t *testing.T) {
 	}
 
 	t.Run("listExporters with namespace", func(t *testing.T) {
-		inst, err := NewInstance(instance, validKubeconfig, false, false)
+		inst, err := NewInstance(instance, validKubeconfig, false, false, false)
 		if err == nil {
 			// Test that the method exists and can be called
 			ctx := context.Background()
@@ -143,7 +143,7 @@ func TestInstanceExporterMethods(t *testing.T) {
 			},
 		}
 
-		inst, err := NewInstance(instanceNoNamespace, validKubeconfig, false, false)
+		inst, err := NewInstance(instanceNoNamespace, validKubeconfig, false, false, false)
 		if err == nil {
 			ctx := context.Background()
 			exporters, err := inst.listExporters(ctx)
@@ -164,7 +164,7 @@ func TestInstanceExporterMethods(t *testing.T) {
 	})
 
 	t.Run("GetExporterByName", func(t *testing.T) {
-		inst, err := NewInstance(instance, validKubeconfig, false, false)
+		inst, err := NewInstance(instance, validKubeconfig, false, false, false)
 		if err == nil {
 			ctx := context.Background()
 			exporter, err := inst.GetExporterByName(ctx, "test-exporter")
@@ -196,7 +196,7 @@ func TestInstanceExporterMethods(t *testing.T) {
 			},
 		}
 
-		inst, err := NewInstance(instanceNoNamespace, validKubeconfig, false, false)
+		inst, err := NewInstance(instanceNoNamespace, validKubeconfig, false, false, false)
 		if err == nil {
 			ctx := context.Background()
 			_, err := inst.GetExporterByName(ctx, "test-exporter")
@@ -220,7 +220,7 @@ func TestInstanceClientMethods(t *testing.T) {
 	}
 
 	t.Run("ListClients with namespace", func(t *testing.T) {
-		inst, err := NewInstance(instance, validKubeconfig, false, false)
+		inst, err := NewInstance(instance, validKubeconfig, false, false, false)
 		if err == nil {
 			ctx := context.Background()
 			clients, err := inst.ListClients(ctx)
@@ -242,7 +242,7 @@ func TestInstanceClientMethods(t *testing.T) {
 	})
 
 	t.Run("GetClientByName", func(t *testing.T) {
-		inst, err := NewInstance(instance, validKubeconfig, false, false)
+		inst, err := NewInstance(instance, validKubeconfig, false, false, false)
 		if err == nil {
 			ctx := context.Background()
 			client, err := inst.GetClientByName(ctx, "test-client")
@@ -274,7 +274,7 @@ func TestInstanceClientMethods(t *testing.T) {
 			},
 		}
 
-		inst, err := NewInstance(instanceNoNamespace, validKubeconfig, false, false)
+		inst, err := NewInstance(instanceNoNamespace, validKubeconfig, false, false, false)
 		if err == nil {
 			ctx := context.Background()
 			_, err := inst.GetClientByName(ctx, "test-client")
@@ -339,7 +339,7 @@ func TestPrintDiff(t *testing.T) {
 		}
 
 		// Create an instance to test the printDiff method
-		inst, err := NewInstance(instance, validKubeconfig, false, false)
+		inst, err := NewInstance(instance, validKubeconfig, false, false, false)
 		if err == nil {
 			// This should not panic and should print a diff
 			inst.checkAndPrintDiff(oldObj, newObj, "exporter", "test-exporter", true)
@@ -356,7 +356,7 @@ func TestPrintDiff(t *testing.T) {
 		}
 
 		// Create an instance to test the printDiff method
-		inst, err := NewInstance(instance, validKubeconfig, false, false)
+		inst, err := NewInstance(instance, validKubeconfig, false, false, false)
 		if err == nil {
 			// This should not panic and should indicate no changes
 			inst.checkAndPrintDiff(obj, obj, "exporter", "test-exporter", true)
@@ -379,7 +379,7 @@ func TestCheckAndPrintDiff(t *testing.T) {
 	}
 
 	// Create an instance for testing
-	inst, err := NewInstance(instance, validKubeconfig, false, false)
+	inst, err := NewInstance(instance, validKubeconfig, false, false, false)
 	require.NoError(t, err)
 
 	t.Run("identical objects should return false", func(t *testing.T) {

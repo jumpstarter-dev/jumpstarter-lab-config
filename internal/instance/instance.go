@@ -22,16 +22,17 @@ const (
 
 // Instance wraps a Kubernetes client and provides methods for operating on Jumpstarter resources
 type Instance struct {
-	client client.Client
-	config *v1alphaConfig.JumpstarterInstance
-	dryRun bool
-	prune  bool
+	client           client.Client
+	config           *v1alphaConfig.JumpstarterInstance
+	dryRun           bool
+	prune            bool
+	printCredentials bool
 }
 
 // NewInstance creates a new Instance from a JumpstarterInstance and optional kubeconfig string
 // If kubeconfigStr is empty, it will try to load from environment/standard kubeconfig file
 // This function ensures proper scheme registration for all custom API types
-func NewInstance(instance *v1alphaConfig.JumpstarterInstance, kubeconfigStr string, dryRun, prune bool) (*Instance, error) {
+func NewInstance(instance *v1alphaConfig.JumpstarterInstance, kubeconfigStr string, dryRun, prune, printCredentials bool) (*Instance, error) {
 	// Validate the instance
 	if err := validateInstance(instance); err != nil {
 		return nil, fmt.Errorf("invalid instance: %w", err)
@@ -88,10 +89,11 @@ func NewInstance(instance *v1alphaConfig.JumpstarterInstance, kubeconfigStr stri
 	}
 
 	return &Instance{
-		client: c,
-		config: instance,
-		dryRun: dryRun,
-		prune:  prune,
+		client:           c,
+		config:           instance,
+		dryRun:           dryRun,
+		prune:            prune,
+		printCredentials: printCredentials,
 	}, nil
 }
 

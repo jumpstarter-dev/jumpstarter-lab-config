@@ -45,6 +45,7 @@ var applyCmd = &cobra.Command{
 		debugConfigs, _ := cmd.Flags().GetBool("debug-configs")
 		filterClients, _ := cmd.Flags().GetString("filter-clients")
 		filterExporters, _ := cmd.Flags().GetString("filter-exporters")
+		printCredentials, _ := cmd.Flags().GetBool("print-exporter-credentials")
 
 		// Determine config file path
 		configFilePath := defaultConfigFile
@@ -97,7 +98,8 @@ var applyCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("error applying template for %s: %w", inst.Name, err)
 			}
-			instanceClient, err := instance.NewInstance(instanceCopy, instanceCopy.Spec.Kubeconfig, dryRun, prune)
+			instanceClient, err := instance.NewInstance(instanceCopy, instanceCopy.Spec.Kubeconfig, dryRun, prune,
+				printCredentials)
 			if err != nil {
 				return fmt.Errorf("error creating instance for %s: %w", inst.Name, err)
 			}
@@ -133,6 +135,7 @@ func init() {
 	applyCmd.Flags().Bool("debug-configs", false, "Show debug configs")
 	applyCmd.Flags().String("filter-clients", "", "Regexp pattern to filter clients by name")
 	applyCmd.Flags().String("filter-exporters", "", "Regexp pattern to filter exporters by name")
+	applyCmd.Flags().Bool("print-exporter-credentials", false, "Print connection details for exporters")
 
 	rootCmd.AddCommand(applyCmd)
 }
