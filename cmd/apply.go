@@ -34,8 +34,10 @@ import (
 var applyCmd = &cobra.Command{
 	Use:   "apply [config-file]",
 	Short: "Apply configuration changes",
-	Long:  `Apply configuration changes to the jumpstarter controllers. Use --dry-run to verify changes before applying.`,
-	Args:  cobra.MaximumNArgs(1),
+	Long: `Apply configuration changes to the jumpstarter controllers. ` +
+		`Use --dry-run to verify changes before applying.`,
+	Args:         cobra.MaximumNArgs(1),
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		prune, _ := cmd.Flags().GetBool("prune")
