@@ -342,7 +342,8 @@ func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config, filter
 				fmt.Printf("🔍 [%s] Exporter connection details snippet for exporter %s:\n%s\n", i.config.Name, cfgExporter.Name, yamlOutput)
 			}
 
-			serviceParametersMap[cfgExporter.Name] = *serviceParameters
+			svcParamRef := i.config.Name + ":" + cfgExporter.Name
+			serviceParametersMap[svcParamRef] = *serviceParameters
 		}
 	}
 
@@ -366,7 +367,8 @@ func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config, filter
 				}
 				fmt.Printf("🔍 [%s] Exporter connection details snippet for exporter %s:\n%s\n", i.config.Name, exporterObj.Name, yamlOutput)
 			}
-			serviceParametersMap[exporterObj.Name] = *serviceParameters
+			svcParamRef := i.config.Name + ":" + exporterObj.Name
+			serviceParametersMap[svcParamRef] = *serviceParameters
 		}
 	}
 
