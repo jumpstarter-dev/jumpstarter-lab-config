@@ -90,7 +90,8 @@ var applyCmd = &cobra.Command{
 			fmt.Println("Applying changes:")
 			fmt.Println()
 		}
-		var serviceParametersMap map[string]template.ServiceParameters
+		// create a serviceParametersMap to store the service parameters for the exporters in the jumpstarter instances
+		serviceParametersMap := make(map[string]template.ServiceParameters)
 
 		for _, inst := range cfg.Loaded.JumpstarterInstances {
 			instanceCopy := inst.DeepCopy()
@@ -109,9 +110,14 @@ var applyCmd = &cobra.Command{
 				return fmt.Errorf("error syncing clients for %s: %w", inst.Name, err)
 			}
 
-			serviceParametersMap, err = instanceClient.SyncExporters(context.Background(), cfg, exporterFilter)
+			instanceServiceParametersMap, err := instanceClient.SyncExporters(context.Background(), cfg, exporterFilter)
 			if err != nil {
 				return fmt.Errorf("error syncing exporters for %s: %w", inst.Name, err)
+			} else {
+				// merge instanceServiceParametersMap into serviceParametersMap
+				for k, v := range instanceServiceParametersMap {
+					serviceParametersMap[k] = v
+				}
 			}
 		}
 

@@ -180,9 +180,10 @@ func (e *ExporterHostSyncer) processExporterInstance(exporterInstance *api.Expor
 		return fmt.Errorf("error creating ExporterInstanceTemplater for %s : %w", errName, err)
 	}
 
-	serviceParameters, ok := e.serviceParametersMap[exporterInstance.Name]
+	spRef := exporterInstance.Spec.JumpstarterInstanceRef.Name + ":" + exporterInstance.Name
+	serviceParameters, ok := e.serviceParametersMap[spRef]
 	if !ok {
-		return fmt.Errorf("service parameters not found for %s", exporterInstance.Name)
+		return fmt.Errorf("service parameters not found for %s", spRef)
 	}
 	et.SetServiceParameters(serviceParameters)
 
