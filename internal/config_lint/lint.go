@@ -24,6 +24,21 @@ func Validate(cfg *config.Config) {
 	fmt.Println("✅ All configurations are valid")
 }
 
+// ValidateWithError checks the loaded configuration for errors and returns an error if any are found.
+// This version does not call os.Exit() and is suitable for use with profiling.
+func ValidateWithError(cfg *config.Config) error {
+	errorsByFile := Lint(cfg)
+	if len(errorsByFile) > 0 {
+		reportAllErrors(errorsByFile)
+		return fmt.Errorf("validation failed with %d error(s)", len(errorsByFile))
+	}
+	keys := cfg.Loaded.GetVariables().GetAllKeys()
+	fmt.Printf("📚 Total Variables: %d\n", len(keys))
+	fmt.Println("")
+	fmt.Println("✅ All configurations are valid")
+	return nil
+}
+
 func Lint(cfg *config.Config) map[string][]error {
 	// This function is a placeholder for the linting logic.
 	// Currently, it only validates cross-references between objects.
