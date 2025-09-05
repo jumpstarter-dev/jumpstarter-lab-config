@@ -19,12 +19,24 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
+// BootcStatus represents the status of bootc upgrade
+type BootcStatus int
+
+const (
+	BOOTC_UP_TO_DATE BootcStatus = iota
+	BOOTC_UPDATING
+	BOOTC_WILL_UPDATE
+	BOOTC_NOT_MANAGED
+)
+
 type HostManager interface {
 	Status() (string, error)
 	NeedsUpdate() (bool, error)
 	Diff() (string, error)
 	Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, dryRun bool) error
 	RunHostCommand(command string) (*CommandResult, error)
+	GetBootcStatus() BootcStatus
+	HandleBootcUpgrade(dryRun bool) error
 }
 
 // CommandResult represents the result of running a command via SSH
@@ -201,6 +213,18 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 	if err != nil {
 		return fmt.Errorf("failed to reconcile exporter config file: %w", err)
 	}
+
+	if m.GetBootcStatus() == BOOTC_UPDATING {
+		if dryRun {
+			fmt.Printf("            📄 Bootc upgrade in progress, would skip exporter service restarts/container updates\n")
+		} else {
+			fmt.Printf("            ⚠️ Bootc upgrade in progress, skipping exporter service restarts/container updates\n")
+			return nil
+		}
+	}
+
+	// Only if bootc is not updating, we restart/start services and pull containers
+	// otherwise it's too much pressure on the system
 
 	if changedExporterConfig || changedContainer || changedService {
 		if !dryRun {
@@ -384,6 +408,59 @@ func (m *SSHHostManager) reconcileFile(path string, content string, dryRun bool)
 
 	fmt.Printf("            ✏️ Updated file: %s\n", path)
 	return true, nil
+}
+
+// GetBootcStatus checks the bootc status and returns the appropriate BootcStatus enum
+func (m *SSHHostManager) GetBootcStatus() BootcStatus {
+	// Check if bootc upgrade service is already running
+	statusCmd, _ := m.RunHostCommand("systemctl is-active bootc-fetch-apply-updates.service bootc-fetch-apply-updates.timer")
+	if statusCmd != nil {
+		statuses := strings.Fields(statusCmd.Stdout)
+		if len(statuses) == 2 &&
+			(statuses[0] == "active" || statuses[0] == "activating" ||
+				statuses[1] == "active" || statuses[1] == "activating") {
+			return BOOTC_UPDATING
+		}
+	}
+
+	// Check booted image
+	bootcStdout, err := m.RunHostCommand("[ -f /run/ostree-booted ] && bootc upgrade --check")
+	if err == nil && bootcStdout != nil && bootcStdout.ExitCode == 0 && bootcStdout.Stdout != "" {
+		if strings.HasPrefix(bootcStdout.Stdout, "No changes") {
+			return BOOTC_UP_TO_DATE
+		} else {
+			return BOOTC_WILL_UPDATE
+		}
+	}
+
+	return BOOTC_NOT_MANAGED
+}
+
+// HandleBootcUpgrade handles bootc upgrade checking and execution
+func (m *SSHHostManager) HandleBootcUpgrade(dryRun bool) error {
+	status := m.GetBootcStatus()
+
+	switch status {
+	case BOOTC_UPDATING:
+		fmt.Printf("    ⚠️  Bootc upgrade in progress\n")
+	case BOOTC_UP_TO_DATE:
+		fmt.Printf("    ✅ Bootc image is up to date\n")
+	case BOOTC_WILL_UPDATE:
+		if dryRun {
+			fmt.Printf("    📄 Would upgrade bootc image\n")
+		} else {
+			// Trigger bootc upgrade timer now. Assuming it uses manual activation (e.g. OnActiveSec=0, RandomizedDelaySec=1h, RemainAfterElapse=false)
+			_, err := m.RunHostCommand("systemctl restart bootc-fetch-apply-updates.timer")
+			if err != nil {
+				return fmt.Errorf("error triggering bootc upgrade service: %w", err)
+			}
+			fmt.Printf("    ✅ Bootc upgrade started\n")
+			return nil
+		}
+	case BOOTC_NOT_MANAGED:
+		fmt.Printf("    ℹ️ Not a bootc managed host\n")
+	}
+	return nil
 }
 
 func (m *SSHHostManager) createSshClient() (*ssh.Client, error) {
