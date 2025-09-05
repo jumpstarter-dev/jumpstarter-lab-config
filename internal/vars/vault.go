@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"strings"
+	"sync"
 
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -38,6 +39,8 @@ type CipherKey struct {
 // VaultDecryptor handles Ansible Vault decryption
 type VaultDecryptor struct {
 	password string
+	cache    map[string]*CipherKey
+	mutex    sync.RWMutex
 }
 
 // NewVaultDecryptor creates a new vault decryptor with the given password
@@ -47,7 +50,10 @@ func NewVaultDecryptor(password string) *VaultDecryptor {
 	password = strings.ReplaceAll(password, "\n", "")
 	password = strings.ReplaceAll(password, "\r", "")
 	password = strings.ReplaceAll(password, "\t", "")
-	return &VaultDecryptor{password: password}
+	return &VaultDecryptor{
+		password: password,
+		cache:    make(map[string]*CipherKey),
+	}
 }
 
 // IsVaultEncrypted checks if a variable value is Ansible Vault encrypted
@@ -76,7 +82,7 @@ func (vd *VaultDecryptor) Decrypt(vaultData string) (string, error) {
 		return "", err
 	}
 	// Generate keys
-	key := generateCipherKey(vd.password, salt)
+	key := vd.generateCipherKey(salt)
 
 	// Verify checksum
 	if !isChecksumValid(checkSum, encryptedData, key.HMACKey) {
@@ -134,21 +140,40 @@ func parseVaultData(vaultData string) (salt, checkSum, data []byte, err error) {
 	return salt, checkSum, data, nil
 }
 
-// generateCipherKey generates cipher keys from password and salt
-func generateCipherKey(password string, salt []byte) *CipherKey {
+// generateCipherKey generates cipher keys from password and salt with caching
+func (vd *VaultDecryptor) generateCipherKey(salt []byte) *CipherKey {
+	// Create cache key from salt (password is already stored in the struct)
+	cacheKey := hex.EncodeToString(salt)
+
+	// Try to get from cache first (read lock)
+	vd.mutex.RLock()
+	if cached, exists := vd.cache[cacheKey]; exists {
+		vd.mutex.RUnlock()
+		return cached
+	}
+	vd.mutex.RUnlock()
+
+	// Generate new cipher key
 	k := pbkdf2.Key(
-		[]byte(password),
+		[]byte(vd.password),
 		salt,
 		iteration,
 		(cipherKeyLength + hmacKeyLength + ivLength),
 		sha256.New,
 	)
 
-	return &CipherKey{
+	cipherKey := &CipherKey{
 		Key:     k[:cipherKeyLength],
 		HMACKey: k[cipherKeyLength:(cipherKeyLength + hmacKeyLength)],
 		IV:      k[(cipherKeyLength + hmacKeyLength):(cipherKeyLength + hmacKeyLength + ivLength)],
 	}
+
+	// Store in cache (write lock)
+	vd.mutex.Lock()
+	vd.cache[cacheKey] = cipherKey
+	vd.mutex.Unlock()
+
+	return cipherKey
 }
 
 // isChecksumValid validates HMAC checksum

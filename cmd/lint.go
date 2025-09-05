@@ -18,6 +18,9 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"runtime/pprof"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -33,6 +36,7 @@ var lintCmd = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vaultPassFile, _ := cmd.Flags().GetString("vault-password-file")
+		cpuProfile, _ := cmd.Flags().GetString("cpu-profile")
 		// Determine config file path
 		configFilePath := defaultConfigFile
 		if len(args) > 0 {
@@ -47,7 +51,37 @@ var lintCmd = &cobra.Command{
 
 		fmt.Println("🔍 Validating configuration...")
 
-		config_lint.Validate(cfg)
+		// Start CPU profiling if requested
+		if cpuProfile != "" {
+			f, err := os.Create(cpuProfile)
+			if err != nil {
+				return fmt.Errorf("could not create CPU profile: %w", err)
+			}
+			defer func() {
+				if closeErr := f.Close(); closeErr != nil {
+					fmt.Printf("Warning: failed to close profile file: %v\n", closeErr)
+				}
+			}()
+
+			if err := pprof.StartCPUProfile(f); err != nil {
+				return fmt.Errorf("could not start CPU profile: %w", err)
+			}
+			defer pprof.StopCPUProfile()
+
+			fmt.Printf("📊 CPU profiling enabled, output will be saved to: %s\n", cpuProfile)
+		}
+
+		// Time the validation
+		start := time.Now()
+		err = config_lint.ValidateWithError(cfg)
+		duration := time.Since(start)
+
+		if err != nil {
+			fmt.Printf("❌ Configuration validation failed in %v\n", duration)
+			return err
+		}
+
+		fmt.Printf("✅ Configuration validation completed in %v\n", duration)
 
 		return nil
 	},
@@ -56,6 +90,8 @@ var lintCmd = &cobra.Command{
 func init() {
 	// Add the vault password file flag
 	lintCmd.Flags().String("vault-password-file", "", "Path to the vault password file for decrypting variables")
+	// Add the CPU profiling flag
+	lintCmd.Flags().String("cpu-profile", "", "Enable CPU profiling and save output to the specified file")
 	// Add the lint command to the root command
 	rootCmd.AddCommand(lintCmd)
 }
