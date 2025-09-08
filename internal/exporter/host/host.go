@@ -70,10 +70,11 @@ func NewExporterHostSyncer(cfg *config.Config,
 		dryRun:               dryRun,
 		debugConfigs:         debugConfigs,
 		exporterFilter:       exporterFilter,
+		// this provides 10 minutes of retries with a max delay of 120 seconds
 		retryConfig: RetryConfig{
-			MaxAttempts:       3,
+			MaxAttempts:       9,
 			BaseDelay:         5 * time.Second,
-			MaxDelay:          60 * time.Second,
+			MaxDelay:          120 * time.Second,
 			BackoffMultiplier: 2.0,
 		},
 	}
