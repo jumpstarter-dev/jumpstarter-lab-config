@@ -33,8 +33,8 @@ import (
 // RetryItem represents a failed exporter instance that needs to be retried
 type RetryItem struct {
 	ExporterInstance *api.ExporterInstance
-	HostSSH          ssh.HostManager
 	HostName         string
+	RenderedHost     *api.ExporterHost // The rendered host with templates applied
 	Attempts         int
 	LastError        error
 	LastAttemptTime  time.Time
@@ -70,10 +70,11 @@ func NewExporterHostSyncer(cfg *config.Config,
 		dryRun:               dryRun,
 		debugConfigs:         debugConfigs,
 		exporterFilter:       exporterFilter,
+		// this provides 10 minutes of retries with a max delay of 120 seconds
 		retryConfig: RetryConfig{
-			MaxAttempts:       3,
+			MaxAttempts:       9,
 			BaseDelay:         5 * time.Second,
-			MaxDelay:          60 * time.Second,
+			MaxDelay:          120 * time.Second,
 			BackoffMultiplier: 2.0,
 		},
 	}
@@ -193,16 +194,59 @@ func (e *ExporterHostSyncer) addToRetryQueue(retryItem *RetryItem, err error, ne
 	*nextRetryQueue = append(*nextRetryQueue, *retryItem)
 }
 
-// processExporterInstancesAndBootc processes exporter instances and adds failures to global retry queue
-func (e *ExporterHostSyncer) processExporterInstancesAndBootc(exporterInstances []*api.ExporterInstance, hostSsh ssh.HostManager, hostName string, retryQueue *[]RetryItem) {
+// getRetryItemDescription returns a human-readable description of what is being retried
+func getRetryItemDescription(retryItem RetryItem) string {
+	if retryItem.ExporterInstance == nil {
+		return "bootc upgrade"
+	} else {
+		return fmt.Sprintf("instance %s", retryItem.ExporterInstance.Name)
+	}
+}
 
+// processExporterInstancesAndBootc processes exporter instances and adds failures to global retry queue
+func (e *ExporterHostSyncer) processExporterInstancesAndBootc(exporterInstances []*api.ExporterInstance, hostName string, renderedHost *api.ExporterHost, retryQueue *[]RetryItem) {
+	// Create SSH connection
+	hostSsh, err := ssh.NewSSHHostManager(renderedHost)
+	if err == nil {
+		_, err = hostSsh.Status()
+	}
+	if err != nil {
+		fmt.Printf("    ❌ Failed to create/test SSH connection: %v\n", err)
+		// Queue all exporter instances for retry
+		for _, exporterInstance := range exporterInstances {
+			*retryQueue = append(*retryQueue, RetryItem{
+				ExporterInstance: exporterInstance,
+				HostName:         hostName,
+				RenderedHost:     renderedHost,
+				Attempts:         1,
+				LastError:        err,
+				LastAttemptTime:  time.Now(),
+			})
+		}
+		// Also queue bootc upgrade for retry
+		*retryQueue = append(*retryQueue, RetryItem{
+			ExporterInstance: nil,
+			HostName:         hostName,
+			RenderedHost:     renderedHost,
+			Attempts:         1,
+			LastError:        err,
+			LastAttemptTime:  time.Now(),
+		})
+		return
+	}
+
+	defer func() {
+		_ = hostSsh.Close()
+	}()
+
+	// Process exporter instances
 	for _, exporterInstance := range exporterInstances {
 		if err := e.processExporterInstance(exporterInstance, hostSsh); err != nil {
 			fmt.Printf("    ❌ Failed to process %s: %v\n", exporterInstance.Name, err)
 			*retryQueue = append(*retryQueue, RetryItem{
 				ExporterInstance: exporterInstance,
-				HostSSH:          hostSsh,
 				HostName:         hostName,
+				RenderedHost:     renderedHost,
 				Attempts:         1,
 				LastError:        err,
 				LastAttemptTime:  time.Now(),
@@ -210,13 +254,13 @@ func (e *ExporterHostSyncer) processExporterInstancesAndBootc(exporterInstances 
 		}
 	}
 
+	// Handle bootc upgrade
 	if err := hostSsh.HandleBootcUpgrade(e.dryRun); err != nil {
-		// For other errors, just log them and continue
 		fmt.Printf("    ⚠️  Bootc upgrade error: %v\n", err)
 		*retryQueue = append(*retryQueue, RetryItem{
 			ExporterInstance: nil,
-			HostSSH:          hostSsh,
 			HostName:         hostName,
+			RenderedHost:     renderedHost,
 			Attempts:         1,
 			LastError:        err,
 			LastAttemptTime:  time.Now(),
@@ -236,9 +280,15 @@ func (e *ExporterHostSyncer) processGlobalRetryQueue(retryQueue []RetryItem) err
 		for _, retryItem := range retryQueue {
 			// Check if we've exceeded max attempts
 			if retryItem.Attempts >= e.retryConfig.MaxAttempts {
-				fmt.Printf("💀 Max retry attempts exceeded for %s on %s, giving up: %v\n",
-					retryItem.ExporterInstance.Name, retryItem.HostName, retryItem.LastError)
-				finalErrors = append(finalErrors, fmt.Sprintf("%s on %s: %v", retryItem.ExporterInstance.Name, retryItem.HostName, retryItem.LastError))
+				if retryItem.ExporterInstance == nil {
+					fmt.Printf("💀 Max retry attempts exceeded for bootc upgrade on %s, giving up: %v\n",
+						retryItem.HostName, retryItem.LastError)
+					finalErrors = append(finalErrors, fmt.Sprintf("bootc upgrade on %s: %v", retryItem.HostName, retryItem.LastError))
+				} else {
+					fmt.Printf("💀 Max retry attempts exceeded for %s on %s, giving up: %v\n",
+						retryItem.ExporterInstance.Name, retryItem.HostName, retryItem.LastError)
+					finalErrors = append(finalErrors, fmt.Sprintf("%s on %s: %v", retryItem.ExporterInstance.Name, retryItem.HostName, retryItem.LastError))
+				}
 				continue
 			}
 
@@ -257,21 +307,43 @@ func (e *ExporterHostSyncer) processGlobalRetryQueue(retryQueue []RetryItem) err
 
 		// Second pass: retry items that are ready
 		for _, retryItem := range itemsToRetry {
+			fmt.Printf("🔄 Retrying %s on %s (attempt %d/%d)...\n",
+				getRetryItemDescription(retryItem), retryItem.HostName, retryItem.Attempts+1, e.retryConfig.MaxAttempts)
+
+			// Create a fresh SSH connection
+			hostSsh, err := ssh.NewSSHHostManager(retryItem.RenderedHost)
+			if err != nil {
+				fmt.Printf("❌ SSH connection failed for %s: %v\n", retryItem.HostName, err)
+				e.addToRetryQueue(&retryItem, err, &nextRetryQueue)
+				continue
+			}
+
+			defer func() {
+				_ = hostSsh.Close()
+			}()
+
+			// Test the connection
+			status, err := hostSsh.Status()
+			if err != nil {
+				fmt.Printf("❌ SSH connection test failed for %s: %v\n", retryItem.HostName, err)
+				e.addToRetryQueue(&retryItem, err, &nextRetryQueue)
+				continue
+			}
+
+			fmt.Printf("✅ SSH connection established for %s: %s\n", retryItem.HostName, status)
+
+			// Now perform the actual retry operation
 			if retryItem.ExporterInstance == nil {
-				fmt.Printf("🔄 Retrying bootc upgrade on %s (attempt %d/%d)...\n",
-					retryItem.HostName, retryItem.Attempts+1, e.retryConfig.MaxAttempts)
-				if err := retryItem.HostSSH.HandleBootcUpgrade(e.dryRun); err != nil {
+				// This was a bootc upgrade failure
+				if err := hostSsh.HandleBootcUpgrade(e.dryRun); err != nil {
 					fmt.Printf("❌ Retry failed for bootc upgrade on %s: %v\n", retryItem.HostName, err)
 					e.addToRetryQueue(&retryItem, err, &nextRetryQueue)
 				} else {
 					fmt.Printf("✅ Retry succeeded for bootc upgrade on %s\n", retryItem.HostName)
 				}
 			} else {
-				fmt.Printf("🔄 Retrying instance %s on %s (attempt %d/%d)...\n",
-					retryItem.ExporterInstance.Name, retryItem.HostName, retryItem.Attempts+1, e.retryConfig.MaxAttempts)
-
-				if err := e.processExporterInstance(retryItem.ExporterInstance, retryItem.HostSSH); err != nil {
-					// Still failed, increment attempts and add to next retry queue
+				// This was an exporter instance failure
+				if err := e.processExporterInstance(retryItem.ExporterInstance, hostSsh); err != nil {
 					fmt.Printf("❌ Retry failed for %s on %s: %v\n", retryItem.ExporterInstance.Name, retryItem.HostName, err)
 					e.addToRetryQueue(&retryItem, err, &nextRetryQueue)
 				} else {
@@ -332,28 +404,20 @@ func (e *ExporterHostSyncer) SyncExporterHosts() error {
 			continue
 		}
 
+		// Apply templates to the host
 		hostCopy := host.DeepCopy()
 		if err := e.tapplier.Apply(hostCopy); err != nil {
 			return fmt.Errorf("error applying template for %s: %w", host.Name, err)
 		}
-
+		// if there are no addresses, skip the host
+		if len(hostCopy.Spec.Addresses) == 0 {
+			fmt.Printf("    ❌ Skipping %s - no addresses\n", host.Name)
+			continue
+		}
 		fmt.Printf("\n💻  Exporter host: %s\n", hostCopy.Spec.Addresses[0])
 
-		hostSsh, err := ssh.NewSSHHostManager(hostCopy)
-		if err != nil {
-			return fmt.Errorf("error creating SSH host manager for %s: %w", host.Name, err)
-		}
-
-		status, err := hostSsh.Status()
-		if err != nil {
-			return fmt.Errorf("error getting status for %s: %w", host.Name, err)
-		}
-		if e.dryRun {
-			fmt.Printf("    ✅ Connection: %s\n", status)
-		}
-
 		// Process each exporter instance and add failures to global retry queue
-		e.processExporterInstancesAndBootc(exporterInstances, hostSsh, host.Name, &retryQueue)
+		e.processExporterInstancesAndBootc(exporterInstances, host.Name, hostCopy, &retryQueue)
 	}
 
 	// Second pass: retry all failed instances globally

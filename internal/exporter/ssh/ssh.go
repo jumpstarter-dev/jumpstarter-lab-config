@@ -37,6 +37,7 @@ type HostManager interface {
 	RunHostCommand(command string) (*CommandResult, error)
 	GetBootcStatus() BootcStatus
 	HandleBootcUpgrade(dryRun bool) error
+	Close() error
 }
 
 // CommandResult represents the result of running a command via SSH
@@ -544,4 +545,24 @@ func (m *SSHHostManager) createSshClient() (*ssh.Client, error) {
 	}
 	return client, nil
 
+}
+
+func (m *SSHHostManager) Close() error {
+	var sftpCloseError error = nil
+	var sshCloseError error = nil
+	if m.sftpClient != nil {
+		sftpCloseError = m.sftpClient.Close()
+	}
+	if m.sshClient != nil {
+		sshCloseError = m.sshClient.Close()
+	}
+	if sshCloseError != nil {
+		return sshCloseError
+	}
+
+	if sftpCloseError != nil {
+		return sftpCloseError
+	}
+
+	return nil
 }
