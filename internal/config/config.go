@@ -4,15 +4,17 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/container"
 	"gopkg.in/yaml.v3"
 )
 
 // Config represents the structure of the jumpstarter-lab.yaml file.
 type Config struct {
-	Sources   Sources          `yaml:"sources"`
-	Variables []string         `yaml:"variables"`
-	BaseDir   string           `yaml:"-"` // Not serialized, set programmatically
-	Loaded    *LoadedLabConfig `yaml:"-"` // Not serialized, used internally
+	Sources           Sources                           `yaml:"sources"`
+	Variables         []string                          `yaml:"variables"`
+	BaseDir           string                            `yaml:"-"` // Not serialized, set programmatically
+	Loaded            *LoadedLabConfig                  `yaml:"-"` // Not serialized, used internally
+	ContainerVersions map[string]*container.ImageLabels `yaml:"-"` // Not serialized, container versions by image URL
 }
 
 // Sources defines the paths for various configuration files.
@@ -43,6 +45,9 @@ func LoadConfig(filePath string, vaultPassFile string) (*Config, error) {
 	cfg.BaseDir = filepath.Dir(filePath)
 
 	cfg.Loaded, err = LoadAllResources(&cfg, vaultPassFile)
+	if err != nil {
+		return nil, err
+	}
 
-	return &cfg, err
+	return &cfg, nil
 }

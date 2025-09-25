@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
+	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/container"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -27,6 +28,10 @@ const (
 	BOOTC_UPDATING
 	BOOTC_WILL_UPDATE
 	BOOTC_NOT_MANAGED
+)
+
+const (
+	noValuePlaceholder = "<no value>"
 )
 
 type HostManager interface {
@@ -186,12 +191,12 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 		if !dryRun {
 			_, enableErr := m.runCommand("systemctl restart " + fmt.Sprintf("%q", serviceName))
 			if enableErr != nil {
-				fmt.Printf("            ❌ Failed to start service %s: %v\n", serviceName, enableErr)
+				fmt.Printf("        ❌ Failed to start service %s: %v\n", serviceName, enableErr)
 			} else {
-				fmt.Printf("            ✅ Service %s started\n", serviceName)
+				fmt.Printf("        ✅ Service %s started\n", serviceName)
 			}
 		} else {
-			fmt.Printf("            📄 Would restart service %s\n", serviceName)
+			fmt.Printf("        📄 Would restart service %s\n", serviceName)
 		}
 	}
 
@@ -217,9 +222,9 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 
 	if m.GetBootcStatus() == BOOTC_UPDATING {
 		if dryRun {
-			fmt.Printf("            📄 Bootc upgrade in progress, would skip exporter service restarts/container updates\n")
+			fmt.Printf("        📄 Bootc upgrade in progress, would skip exporter service restarts/container updates\n")
 		} else {
-			fmt.Printf("            ⚠️ Bootc upgrade in progress, skipping exporter service restarts/container updates\n")
+			fmt.Printf("        ⚠️ Bootc upgrade in progress, skipping exporter service restarts/container updates\n")
 			return nil
 		}
 	}
@@ -245,37 +250,128 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 	} else {
 		// Check if service is running and start if needed
 		statusResult, err := m.runCommand("systemctl is-active " + fmt.Sprintf("%q", svcName))
-		if err != nil || statusResult.Stdout != "active\n" {
-			fmt.Printf("            ⚠️ Service %s is not running...\n", svcName)
-			restartService(svcName, dryRun)
-		}
+		serviceRunning := err == nil && statusResult.Stdout == "active\n"
 
-		// Check if container needs updating using podman auto-update (if podman exists)
-		autoUpdateResult, err := m.runCommand(fmt.Sprintf("command -v podman >/dev/null 2>&1 && podman auto-update --dry-run --format json | jq -r '.[] | select(.ContainerName == %q) | .Updated'", svcName))
-		if err != nil {
-			fmt.Printf("            ℹ️ Podman not available, skipping auto-update check\n")
+		if !serviceRunning {
+			fmt.Printf("        ⚠️ Service %s is not running...\n", svcName)
+			restartService(svcName, dryRun)
 		} else {
-			updatedOutput := strings.TrimSpace(autoUpdateResult.Stdout)
-			switch updatedOutput {
-			case "":
-				fmt.Printf("            ⚠️ Container %s not found in auto-update check\n", svcName)
-			case "false":
-				if dryRun {
-					fmt.Printf("            ✅ Exporter container image is up to date\n")
-				}
-			case "pending":
-				if dryRun {
-					fmt.Printf("            📄 Would update container %s\n", svcName)
-				} else {
-					restartService(svcName, dryRun)
-				}
-			default:
-				return fmt.Errorf("unexpected auto-update result: %s", updatedOutput)
+			// Only check container version if service is running
+			err = m.checkContainerVersion(exporterConfig, svcName, dryRun, restartService)
+			if err != nil {
+				return fmt.Errorf("container version check failed: %w", err)
 			}
 		}
 	}
 
 	return nil
+}
+
+// checkContainerVersion checks if container needs updating using detailed version comparison
+func (m *SSHHostManager) checkContainerVersion(exporterConfig *v1alpha1.ExporterConfigTemplate, svcName string, dryRun bool, restartService func(string, bool)) error {
+	// Only check version for container-based exporters
+	if exporterConfig.Spec.SystemdContainerTemplate == "" {
+		return nil
+	}
+
+	// Check detailed version comparison (if we have container image info)
+	if exporterConfig.Spec.ContainerImage != "" {
+		return m.checkDetailedContainerVersion(exporterConfig.Spec.ContainerImage, svcName, dryRun, restartService)
+	}
+
+	// No container image specified, nothing to check
+	return nil
+}
+
+// checkDetailedContainerVersion performs detailed version comparison using skopeo and podman inspect
+func (m *SSHHostManager) checkDetailedContainerVersion(containerImage, svcName string, dryRun bool, restartService func(string, bool)) error {
+	// Get expected version from registry
+	expectedLabels, err := container.GetImageLabelsFromRegistry(containerImage)
+	if err != nil {
+		fmt.Printf("        ⚠️ Could not check container version: %v\n", err)
+		return nil // Don't fail the entire operation, just skip version check
+	}
+
+	if expectedLabels.IsEmpty() {
+		fmt.Printf("        ℹ️ No version info available for image %s\n", containerImage)
+		return nil // Don't fail, just skip version check
+	}
+
+	// Get running container version
+	runningLabels, err := m.getRunningContainerLabels(svcName)
+	if err != nil {
+		fmt.Printf("        ⚠️ Could not check running container version: %v\n", err)
+		return nil // Container might not be running yet, which is fine
+	}
+
+	// Compare versions
+	if expectedLabels.Matches(runningLabels) {
+		if dryRun {
+			fmt.Printf("        ✅ Exporter container image running latest version\n")
+		}
+		// In non-dry-run mode, print nothing for matching versions as requested
+	} else {
+		if dryRun {
+			fmt.Printf("        🔄 Would restart service for container update (running: %s, latest: %s)\n",
+				runningLabels.String(), expectedLabels.String())
+		} else {
+			fmt.Printf("        🔄 Restarting service for container update (running: %s, latest: %s)\n",
+				runningLabels.String(), expectedLabels.String())
+			restartService(svcName, dryRun)
+		}
+	}
+
+	return nil
+}
+
+// getRunningContainerLabels gets container labels from running container
+func (m *SSHHostManager) getRunningContainerLabels(serviceName string) (*container.ImageLabels, error) {
+	// Try jumpstarter labels first, then fall back to OCI standard labels
+	result, err := m.runCommand(fmt.Sprintf("podman inspect --format '{{index .Config.Labels \"jumpstarter.version\"}}\n{{index .Config.Labels \"jumpstarter.revision\"}}\n{{index .Config.Labels \"org.opencontainers.image.version\"}}\n{{index .Config.Labels \"org.opencontainers.image.revision\"}}' %s", serviceName))
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect container %s: %w", serviceName, err)
+	}
+
+	parts := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+	// Pad with empty strings if we got fewer parts
+	for len(parts) < 4 {
+		parts = append(parts, "")
+	}
+
+	jumpstarterVersion := parts[0]  // jumpstarter.version
+	jumpstarterRevision := parts[1] // jumpstarter.revision
+	ociVersion := parts[2]          // org.opencontainers.image.version
+	ociRevision := parts[3]         // org.opencontainers.image.revision
+
+	// Clean up "<no value>" to empty string
+	if jumpstarterVersion == noValuePlaceholder {
+		jumpstarterVersion = ""
+	}
+	if jumpstarterRevision == noValuePlaceholder {
+		jumpstarterRevision = ""
+	}
+	if ociVersion == noValuePlaceholder {
+		ociVersion = ""
+	}
+	if ociRevision == noValuePlaceholder {
+		ociRevision = ""
+	}
+
+	// Use jumpstarter labels if both exist, otherwise fall back to OCI labels
+	var version, revision string
+	if jumpstarterVersion != "" && jumpstarterRevision != "" {
+		version = jumpstarterVersion
+		revision = jumpstarterRevision
+	} else {
+		version = ociVersion
+		revision = ociRevision
+	}
+
+	// Return labels even if only partially available (version OR revision can be empty)
+	return &container.ImageLabels{
+		Version:  version,
+		Revision: revision,
+	}, nil
 }
 
 // RunHostCommand implements the HostManager interface by exposing runCommand
