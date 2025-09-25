@@ -336,12 +336,12 @@ func (m *SSHHostManager) checkDetailedContainerVersion(containerImage, svcName s
 // getRunningContainerLabels gets container labels from running container
 func (m *SSHHostManager) getRunningContainerLabels(serviceName string) (*container.ImageLabels, error) {
 	// Try jumpstarter labels first, then fall back to OCI standard labels
-	result, err := m.runCommand(fmt.Sprintf("podman inspect --format '{{index .Config.Labels \"jumpstarter.version\"}}\n{{index .Config.Labels \"jumpstarter.revision\"}}\n{{index .Config.Labels \"org.opencontainers.image.version\"}}\n{{index .Config.Labels \"org.opencontainers.image.revision\"}}' %s", serviceName))
+	result, err := m.runCommand(fmt.Sprintf("podman inspect --format '{{index .Config.Labels \"jumpstarter.version\"}} {{index .Config.Labels \"jumpstarter.revision\"}} {{index .Config.Labels \"org.opencontainers.image.version\"}} {{index .Config.Labels \"org.opencontainers.image.revision\"}}' %s", serviceName))
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect container %s: %w", serviceName, err)
 	}
 
-	parts := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+	parts := strings.Fields(strings.TrimSpace(result.Stdout))
 	// Pad with empty strings if we got fewer parts
 	for len(parts) < 4 {
 		parts = append(parts, "")

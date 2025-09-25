@@ -329,6 +329,8 @@ func retrieveContainerVersionsFromExporters(loaded *LoadedLabConfig) map[string]
 
 	// Retrieve version information for each unique image
 	for imageURL := range uniqueImages {
+		fmt.Printf("🔍 Checking container version for %s...\n", imageURL)
+
 		imageLabels, err := container.GetImageLabelsFromRegistry(imageURL)
 		if err != nil {
 			fmt.Printf("Latest container version of %s: unavailable (%v)\n", imageURL, err)

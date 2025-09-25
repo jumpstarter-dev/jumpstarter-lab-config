@@ -60,9 +60,6 @@ var applyCmd = &cobra.Command{
 		}
 
 		config_lint.Validate(cfg)
-		if err := config_lint.ValidateWithError(cfg); err != nil {
-			return fmt.Errorf("config validation failed: %w", err)
-		}
 
 		tapplier, err := templating.NewTemplateApplier(cfg, nil)
 		if err != nil {
