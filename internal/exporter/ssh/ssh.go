@@ -186,17 +186,17 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 		return fmt.Errorf("both SystemdContainerTemplate and SystemdServiceTemplate specified - only one should be used")
 	}
 
-	// Helper function to restart service
-	restartService := func(serviceName string, dryRun bool) {
+	// Helper function to restart service, gracefully wating on lease exit
+	restartGracefully := func(serviceName string, dryRun bool) {
 		if !dryRun {
-			_, enableErr := m.runCommand("systemctl restart " + fmt.Sprintf("%q", serviceName))
+			_, enableErr := m.runCommand(fmt.Sprintf("command -v podman >/dev/null 2>&1 && podman kill -s SIGHUP %q || systemctl kill -s SIGHUP %q", serviceName, serviceName))
 			if enableErr != nil {
-				fmt.Printf("        ❌ Failed to start service %s: %v\n", serviceName, enableErr)
+				fmt.Printf("        ❌ Failed to signal %s: %v\n", serviceName, enableErr)
 			} else {
-				fmt.Printf("        ✅ Service %s started\n", serviceName)
+				fmt.Printf("        ✅ %s signalled to restart when not leased\n", serviceName)
 			}
 		} else {
-			fmt.Printf("        📄 Would restart service %s\n", serviceName)
+			fmt.Printf("        📄 Would trigger restart of %s\n", serviceName)
 		}
 	}
 
@@ -245,7 +245,7 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 					return fmt.Errorf("failed to enable exporter: %w", err)
 				}
 			}
-			restartService(svcName, dryRun)
+			restartGracefully(svcName, dryRun)
 		}
 	} else {
 		// Check if service is running and start if needed
@@ -254,10 +254,19 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 
 		if !serviceRunning {
 			fmt.Printf("        ⚠️ Service %s is not running...\n", svcName)
-			restartService(svcName, dryRun)
+			if !dryRun {
+				_, enableErr := m.runCommand("systemctl restart " + fmt.Sprintf("%q", svcName))
+				if enableErr != nil {
+					fmt.Printf("        ❌ Failed to restart service %s: %v\n", svcName, enableErr)
+				} else {
+					fmt.Printf("        ✅ Service %s restarted\n", svcName)
+				}
+			} else {
+				fmt.Printf("        📄 Would restart service %s\n", svcName)
+			}
 		} else {
 			// Only check container version if service is running
-			err = m.checkContainerVersion(exporterConfig, svcName, dryRun, restartService)
+			err = m.checkContainerVersion(exporterConfig, svcName, dryRun, restartGracefully)
 			if err != nil {
 				return fmt.Errorf("container version check failed: %w", err)
 			}
