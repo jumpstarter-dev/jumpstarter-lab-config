@@ -9,6 +9,7 @@ import (
 
 	jsApi "github.com/jumpstarter-dev/jumpstarter-controller/api/v1alpha1"
 	api "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
+	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/container"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/vars"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -305,7 +306,43 @@ func LoadAllResources(cfg *Config, vaultPassFile string) (*LoadedLabConfig, erro
 		}
 	}
 
+	// Retrieve container versions for all unique container images found in exporters
+	containerVersions := retrieveContainerVersionsFromExporters(loaded)
+
+	// Store the container versions in the config
+	cfg.ContainerVersions = containerVersions
+
 	return loaded, nil
+}
+
+// retrieveContainerVersionsFromExporters retrieves container versions for all unique container images found in exporters
+func retrieveContainerVersionsFromExporters(loaded *LoadedLabConfig) map[string]*container.ImageLabels {
+	containerVersions := make(map[string]*container.ImageLabels)
+	uniqueImages := make(map[string]bool)
+
+	// Collect all unique container images from exporter config templates
+	for _, template := range loaded.ExporterConfigTemplates {
+		if template.Spec.ContainerImage != "" {
+			uniqueImages[template.Spec.ContainerImage] = true
+		}
+	}
+
+	// Retrieve version information for each unique image
+	for imageURL := range uniqueImages {
+		imageLabels, err := container.GetImageLabelsFromRegistry(imageURL)
+		if err != nil {
+			fmt.Printf("Latest container version of %s: unavailable (%v)\n", imageURL, err)
+			containerVersions[imageURL] = &container.ImageLabels{} // Store empty labels
+		} else if imageLabels.IsEmpty() {
+			fmt.Printf("Latest container version of %s: no version info available\n", imageURL)
+			containerVersions[imageURL] = imageLabels
+		} else {
+			fmt.Printf("Latest container version of %s: %s %s\n", imageURL, imageLabels.Version, imageLabels.Revision)
+			containerVersions[imageURL] = imageLabels
+		}
+	}
+
+	return containerVersions
 }
 
 func ReportLoading(cfg *Config) {
