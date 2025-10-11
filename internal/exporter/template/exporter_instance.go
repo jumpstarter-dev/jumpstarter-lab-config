@@ -17,6 +17,7 @@ type ExporterInstanceTemplater struct {
 	exporterInstance       *v1alpha1.ExporterInstance
 	exporterConfigTemplate *v1alpha1.ExporterConfigTemplate
 	serviceParameters      ServiceParameters
+	renderedExporterHost   *v1alpha1.ExporterHost
 }
 
 func NewExporterInstanceTemplater(cfg *config.Config, exporterInstance *v1alpha1.ExporterInstance) (*ExporterInstanceTemplater, error) {
@@ -33,6 +34,10 @@ func NewExporterInstanceTemplater(cfg *config.Config, exporterInstance *v1alpha1
 
 func (e *ExporterInstanceTemplater) SetServiceParameters(serviceParameters ServiceParameters) {
 	e.serviceParameters = serviceParameters
+}
+
+func (e *ExporterInstanceTemplater) SetRenderedExporterHost(renderedExporterHost *v1alpha1.ExporterHost) {
+	e.renderedExporterHost = renderedExporterHost
 }
 
 func (s *ServiceParameters) Parameters() *templating.Parameters {
@@ -65,6 +70,11 @@ func (e *ExporterInstanceTemplater) renderTemplates() (*v1alpha1.ExporterInstanc
 	templateParametersMap["namespace"] = namespace
 	templateParametersMap["endpoint"] = endpoint
 	templateParametersMap["container_image"] = e.exporterConfigTemplate.Spec.ContainerImage
+
+	// Add ExporterHost addresses if available (managed devices only)
+	if e.renderedExporterHost != nil && len(e.renderedExporterHost.Spec.Addresses) > 0 {
+		templateParametersMap["sidekick_address"] = e.renderedExporterHost.Spec.Addresses[0]
+	}
 	templateParameters := templating.NewParameters("exporter-instance")
 	templateParameters.SetFromMap(templateParametersMap)
 

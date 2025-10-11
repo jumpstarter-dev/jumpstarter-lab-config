@@ -129,7 +129,7 @@ func (e *ExporterHostSyncer) filterExporterInstances(hostName string, exporterIn
 }
 
 // processExporterInstance processes a single exporter instance
-func (e *ExporterHostSyncer) processExporterInstance(exporterInstance *api.ExporterInstance, hostSsh ssh.HostManager) error {
+func (e *ExporterHostSyncer) processExporterInstance(exporterInstance *api.ExporterInstance, hostSsh ssh.HostManager, renderedHost *api.ExporterHost) error {
 	if isDead, deadAnnotation := isExporterInstanceDead(exporterInstance); isDead {
 		fmt.Printf("    📟 Exporter instance: %s skipped - dead: %s\n", exporterInstance.Name, deadAnnotation)
 		return nil
@@ -149,6 +149,7 @@ func (e *ExporterHostSyncer) processExporterInstance(exporterInstance *api.Expor
 		return fmt.Errorf("service parameters not found for %s", spRef)
 	}
 	et.SetServiceParameters(serviceParameters)
+	et.SetRenderedExporterHost(renderedHost)
 
 	_, err = et.RenderTemplateLabels()
 	if err != nil {
@@ -241,7 +242,7 @@ func (e *ExporterHostSyncer) processExporterInstancesAndBootc(exporterInstances 
 
 	// Process exporter instances
 	for _, exporterInstance := range exporterInstances {
-		if err := e.processExporterInstance(exporterInstance, hostSsh); err != nil {
+		if err := e.processExporterInstance(exporterInstance, hostSsh, renderedHost); err != nil {
 			fmt.Printf("    ❌ Failed to process %s: %v\n", exporterInstance.Name, err)
 			*retryQueue = append(*retryQueue, RetryItem{
 				ExporterInstance: exporterInstance,
@@ -343,7 +344,7 @@ func (e *ExporterHostSyncer) processGlobalRetryQueue(retryQueue []RetryItem) err
 				}
 			} else {
 				// This was an exporter instance failure
-				if err := e.processExporterInstance(retryItem.ExporterInstance, hostSsh); err != nil {
+				if err := e.processExporterInstance(retryItem.ExporterInstance, hostSsh, retryItem.RenderedHost); err != nil {
 					fmt.Printf("❌ Retry failed for %s on %s: %v\n", retryItem.ExporterInstance.Name, retryItem.HostName, err)
 					e.addToRetryQueue(&retryItem, err, &nextRetryQueue)
 				} else {
