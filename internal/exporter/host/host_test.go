@@ -1,7 +1,10 @@
 package host
 
 import (
+	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
@@ -219,6 +222,153 @@ func TestHostSkippingBehavior(t *testing.T) {
 
 			assert.Equal(t, tt.shouldSkipHost, hostWouldBeSkipped, tt.description)
 			assert.Equal(t, tt.expectedAlivCount, aliveCount, "unexpected number of alive instances")
+		})
+	}
+}
+
+func TestOutputBuffer(t *testing.T) {
+	t.Run("Printf writes to buffer", func(t *testing.T) {
+		out := NewOutputBuffer("host-1", 3)
+		out.Printf("hello %s", "world")
+		out.Printf(" number %d", 42)
+
+		assert.Equal(t, "hello world number 42", out.buf.String())
+	})
+
+	t.Run("Writer returns buffer writer", func(t *testing.T) {
+		out := NewOutputBuffer("host-1", 2)
+		w := out.Writer()
+		_, _ = fmt.Fprintf(w, "via writer")
+
+		assert.Equal(t, "via writer", out.buf.String())
+	})
+
+	t.Run("MarkChanged and MarkError are independent", func(t *testing.T) {
+		out := NewOutputBuffer("host-1", 1)
+		assert.False(t, out.hasChanges)
+		assert.False(t, out.hasErrors)
+
+		out.MarkChanged()
+		assert.True(t, out.hasChanges)
+		assert.False(t, out.hasErrors)
+
+		out.MarkError()
+		assert.True(t, out.hasChanges)
+		assert.True(t, out.hasErrors)
+	})
+
+	t.Run("AddRetryItem collects items", func(t *testing.T) {
+		out := NewOutputBuffer("host-1", 2)
+		assert.Empty(t, out.retryItems)
+
+		out.AddRetryItem(RetryItem{HostName: "host-1", Attempts: 1})
+		out.AddRetryItem(RetryItem{HostName: "host-1", Attempts: 1})
+
+		assert.Len(t, out.retryItems, 2)
+	})
+
+	t.Run("Done records duration", func(t *testing.T) {
+		out := NewOutputBuffer("host-1", 1)
+		time.Sleep(10 * time.Millisecond)
+		out.Done()
+
+		assert.Greater(t, out.duration, time.Duration(0))
+	})
+}
+
+func TestSyncPrinterCounters(t *testing.T) {
+	t.Run("FlushBuffer tracks ok, changed, failed counts", func(t *testing.T) {
+		printer := NewSyncPrinter()
+
+		okBuf := NewOutputBuffer("ok-host", 2)
+		okBuf.Done()
+		printer.FlushBuffer(okBuf)
+
+		changedBuf := NewOutputBuffer("changed-host", 3)
+		changedBuf.MarkChanged()
+		changedBuf.Done()
+		printer.FlushBuffer(changedBuf)
+
+		failedBuf := NewOutputBuffer("failed-host", 1)
+		failedBuf.MarkError()
+		failedBuf.Done()
+		printer.FlushBuffer(failedBuf)
+
+		assert.Equal(t, int32(1), printer.okCount.Load())
+		assert.Equal(t, int32(1), printer.changedCount.Load())
+		assert.Equal(t, int32(1), printer.failedCount.Load())
+		assert.Equal(t, int32(6), printer.totalInstances.Load())
+		assert.Equal(t, []string{"failed-host"}, printer.failedHosts)
+	})
+
+	t.Run("error takes precedence over changed", func(t *testing.T) {
+		printer := NewSyncPrinter()
+
+		buf := NewOutputBuffer("both-host", 1)
+		buf.MarkChanged()
+		buf.MarkError()
+		buf.Done()
+		printer.FlushBuffer(buf)
+
+		// Should count as failed, not changed
+		assert.Equal(t, int32(0), printer.okCount.Load())
+		assert.Equal(t, int32(0), printer.changedCount.Load())
+		assert.Equal(t, int32(1), printer.failedCount.Load())
+	})
+
+	t.Run("AddRetryStats accumulates", func(t *testing.T) {
+		printer := NewSyncPrinter()
+		printer.AddRetryStats(5, 3)
+		printer.AddRetryStats(2, 1)
+
+		assert.Equal(t, int32(7), printer.retryCount.Load())
+		assert.Equal(t, int32(4), printer.retrySuccess.Load())
+	})
+}
+
+func TestSyncPrinterConcurrentFlush(t *testing.T) {
+	printer := NewSyncPrinter()
+	var wg sync.WaitGroup
+
+	// Flush 50 buffers concurrently to verify no races
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			buf := NewOutputBuffer(fmt.Sprintf("host-%d", idx), idx%5+1)
+			if idx%3 == 0 {
+				buf.MarkChanged()
+			}
+			if idx%7 == 0 {
+				buf.MarkError()
+			}
+			buf.Done()
+			printer.FlushBuffer(buf)
+		}(i)
+	}
+	wg.Wait()
+
+	total := printer.okCount.Load() + printer.changedCount.Load() + printer.failedCount.Load()
+	assert.Equal(t, int32(50), total, "all 50 buffers should be counted")
+}
+
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		duration time.Duration
+		expected string
+	}{
+		{0, "0ms"},
+		{500 * time.Millisecond, "500ms"},
+		{999 * time.Millisecond, "999ms"},
+		{1500 * time.Millisecond, "1.5s"},
+		{30 * time.Second, "30.0s"},
+		{90 * time.Second, "1m30s"},
+		{5*time.Minute + 15*time.Second, "5m15s"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			assert.Equal(t, tt.expected, formatDuration(tt.duration))
 		})
 	}
 }

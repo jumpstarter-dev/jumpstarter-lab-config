@@ -42,6 +42,7 @@ type HostManager interface {
 	RunHostCommand(command string) (*CommandResult, error)
 	GetBootcStatus() BootcStatus
 	HandleBootcUpgrade(dryRun bool) error
+	SetWriter(w io.Writer)
 	Close() error
 }
 
@@ -57,6 +58,7 @@ type SSHHostManager struct {
 	sshClient    *ssh.Client
 	sftpClient   *sftp.Client
 	mutex        *sync.Mutex
+	writer       io.Writer
 }
 
 func NewSSHHostManager(exporterHost *v1alpha1.ExporterHost) (HostManager, error) {
@@ -66,6 +68,7 @@ func NewSSHHostManager(exporterHost *v1alpha1.ExporterHost) (HostManager, error)
 		mutex:        &sync.Mutex{},
 		sshClient:    nil,
 		sftpClient:   nil,
+		writer:       os.Stdout,
 	}
 
 	sshClient, err := sshHm.createSshClient()
@@ -191,12 +194,12 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 		if !dryRun {
 			_, enableErr := m.runCommand(fmt.Sprintf("command -v podman >/dev/null 2>&1 && podman kill -s SIGHUP %q || systemctl kill -s SIGHUP %q", serviceName, serviceName))
 			if enableErr != nil {
-				fmt.Printf("        ❌ Failed to signal %s: %v\n", serviceName, enableErr)
+				_, _ = fmt.Fprintf(m.writer, "        ❌ Failed to signal %s: %v\n", serviceName, enableErr)
 			} else {
-				fmt.Printf("        ✅ %s signalled to restart when not leased\n", serviceName)
+				_, _ = fmt.Fprintf(m.writer, "        ✅ %s signalled to restart when not leased\n", serviceName)
 			}
 		} else {
-			fmt.Printf("        📄 Would trigger restart of %s\n", serviceName)
+			_, _ = fmt.Fprintf(m.writer, "        📄 Would trigger restart of %s\n", serviceName)
 		}
 	}
 
@@ -222,9 +225,9 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 
 	if m.GetBootcStatus() == BOOTC_UPDATING {
 		if dryRun {
-			fmt.Printf("        📄 Bootc upgrade in progress, would skip exporter service restarts/container updates\n")
+			_, _ = fmt.Fprintf(m.writer, "        📄 Bootc upgrade in progress, would skip exporter service restarts/container updates\n")
 		} else {
-			fmt.Printf("        ⚠️ Bootc upgrade in progress, skipping exporter service restarts/container updates\n")
+			_, _ = fmt.Fprintf(m.writer, "        ⚠️ Bootc upgrade in progress, skipping exporter service restarts/container updates\n")
 			return nil
 		}
 	}
@@ -253,16 +256,16 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 		serviceRunning := err == nil && statusResult.Stdout == "active\n"
 
 		if !serviceRunning {
-			fmt.Printf("        ⚠️ Service %s is not running...\n", svcName)
+			_, _ = fmt.Fprintf(m.writer, "        ⚠️ Service %s is not running...\n", svcName)
 			if !dryRun {
 				_, enableErr := m.runCommand("systemctl restart " + fmt.Sprintf("%q", svcName))
 				if enableErr != nil {
-					fmt.Printf("        ❌ Failed to restart service %s: %v\n", svcName, enableErr)
+					_, _ = fmt.Fprintf(m.writer, "        ❌ Failed to restart service %s: %v\n", svcName, enableErr)
 				} else {
-					fmt.Printf("        ✅ Service %s restarted\n", svcName)
+					_, _ = fmt.Fprintf(m.writer, "        ✅ Service %s restarted\n", svcName)
 				}
 			} else {
-				fmt.Printf("        📄 Would restart service %s\n", svcName)
+				_, _ = fmt.Fprintf(m.writer, "        📄 Would restart service %s\n", svcName)
 			}
 		} else {
 			// Only check container version if service is running
@@ -297,34 +300,34 @@ func (m *SSHHostManager) checkDetailedContainerVersion(containerImage, svcName s
 	// Get expected version from registry
 	expectedLabels, err := container.GetImageLabelsFromRegistry(containerImage)
 	if err != nil {
-		fmt.Printf("        ⚠️ Could not check container version: %v\n", err)
+		_, _ = fmt.Fprintf(m.writer, "        ⚠️ Could not check container version: %v\n", err)
 		return nil // Don't fail the entire operation, just skip version check
 	}
 
 	if expectedLabels.IsEmpty() {
-		fmt.Printf("        ℹ️ No version info available for image %s\n", containerImage)
+		_, _ = fmt.Fprintf(m.writer, "        ℹ️ No version info available for image %s\n", containerImage)
 		return nil // Don't fail, just skip version check
 	}
 
 	// Get running container version
 	runningLabels, err := m.getRunningContainerLabels(svcName)
 	if err != nil {
-		fmt.Printf("        ⚠️ Could not check running container version: %v\n", err)
+		_, _ = fmt.Fprintf(m.writer, "        ⚠️ Could not check running container version: %v\n", err)
 		return nil // Container might not be running yet, which is fine
 	}
 
 	// Compare versions
 	if expectedLabels.Matches(runningLabels) {
 		if dryRun {
-			fmt.Printf("        ✅ Exporter container image running latest version\n")
+			_, _ = fmt.Fprintf(m.writer, "        ✅ Exporter container image running latest version\n")
 		}
 		// In non-dry-run mode, print nothing for matching versions as requested
 	} else {
 		if dryRun {
-			fmt.Printf("        🔄 Would restart service for container update (running: %s, latest: %s)\n",
+			_, _ = fmt.Fprintf(m.writer, "        🔄 Would restart service for container update (running: %s, latest: %s)\n",
 				runningLabels.String(), expectedLabels.String())
 		} else {
-			fmt.Printf("        🔄 Restarting service for container update (running: %s, latest: %s)\n",
+			_, _ = fmt.Fprintf(m.writer, "        🔄 Restarting service for container update (running: %s, latest: %s)\n",
 				runningLabels.String(), expectedLabels.String())
 			restartService(svcName, dryRun)
 		}
@@ -426,7 +429,7 @@ func (m *SSHHostManager) reconcileFile(path string, content string, dryRun bool)
 
 		// File doesn't exist and content is not empty - create it
 		if dryRun {
-			fmt.Printf("            📄 Would create file: %s\n", path)
+			_, _ = fmt.Fprintf(m.writer, "            📄 Would create file: %s\n", path)
 			return true, nil
 		}
 
@@ -453,7 +456,7 @@ func (m *SSHHostManager) reconcileFile(path string, content string, dryRun bool)
 			return false, fmt.Errorf("failed to write content to %s: %w", path, err)
 		}
 
-		fmt.Printf("            📄 Created file: %s\n", path)
+		_, _ = fmt.Fprintf(m.writer, "            📄 Created file: %s\n", path)
 		return true, nil
 	}
 
@@ -461,21 +464,21 @@ func (m *SSHHostManager) reconcileFile(path string, content string, dryRun bool)
 	existingContent, err := io.ReadAll(file)
 	_ = file.Close() // nolint:errcheck
 	if err != nil {
-		fmt.Printf("Failed to read existing file %s: %v\n", path, err)
+		_, _ = fmt.Fprintf(m.writer, "Failed to read existing file %s: %v\n", path, err)
 		return false, fmt.Errorf("failed to read existing file %s: %w", path, err)
 	}
 
 	// If content is empty, delete the file
 	if content == "" {
 		if dryRun {
-			fmt.Printf("            🗑️ Would delete file: %s\n", path)
+			_, _ = fmt.Fprintf(m.writer, "            🗑️ Would delete file: %s\n", path)
 			return true, nil
 		}
 		err = m.sftpClient.Remove(path)
 		if err != nil {
 			return false, fmt.Errorf("failed to delete file %s: %w", path, err)
 		}
-		fmt.Printf("            🗑️  Deleted file: %s\n", path)
+		_, _ = fmt.Fprintf(m.writer, "            🗑️  Deleted file: %s\n", path)
 		return true, nil
 	}
 
@@ -489,12 +492,12 @@ func (m *SSHHostManager) reconcileFile(path string, content string, dryRun bool)
 	diff := cmp.Diff(string(existingContent), content)
 	if diff != "" {
 		sanitizedDiff := sanitizeDiff(diff)
-		fmt.Printf("            📄 Changes for file: %s\n", path)
-		fmt.Printf("            Diff (-existing +new):\n%s\n", sanitizedDiff)
+		_, _ = fmt.Fprintf(m.writer, "            📄 Changes for file: %s\n", path)
+		_, _ = fmt.Fprintf(m.writer, "            Diff (-existing +new):\n%s\n", sanitizedDiff)
 	}
 
 	if dryRun {
-		fmt.Printf("            ✏️ Would update file: %s\n", path)
+		_, _ = fmt.Fprintf(m.writer, "            ✏️ Would update file: %s\n", path)
 		return true, nil
 	}
 
@@ -508,11 +511,11 @@ func (m *SSHHostManager) reconcileFile(path string, content string, dryRun bool)
 
 	_, err = updateFile.Write([]byte(content))
 	if err != nil {
-		fmt.Printf("Failed to write updated content to %s: %v\n", path, err)
+		_, _ = fmt.Fprintf(m.writer, "Failed to write updated content to %s: %v\n", path, err)
 		return false, fmt.Errorf("failed to write updated content to %s: %w", path, err)
 	}
 
-	fmt.Printf("            ✏️ Updated file: %s\n", path)
+	_, _ = fmt.Fprintf(m.writer, "            ✏️ Updated file: %s\n", path)
 	return true, nil
 }
 
@@ -548,23 +551,23 @@ func (m *SSHHostManager) HandleBootcUpgrade(dryRun bool) error {
 
 	switch status {
 	case BOOTC_UPDATING:
-		fmt.Printf("    ⚠️  Bootc upgrade in progress\n")
+		_, _ = fmt.Fprintf(m.writer, "    ⚠️  Bootc upgrade in progress\n")
 	case BOOTC_UP_TO_DATE:
-		fmt.Printf("    ✅ Bootc image is up to date\n")
+		_, _ = fmt.Fprintf(m.writer, "    ✅ Bootc image is up to date\n")
 	case BOOTC_WILL_UPDATE:
 		if dryRun {
-			fmt.Printf("    📄 Would upgrade bootc image\n")
+			_, _ = fmt.Fprintf(m.writer, "    📄 Would upgrade bootc image\n")
 		} else {
 			// Trigger bootc upgrade timer now. Assuming it uses manual activation (e.g. OnActiveSec=0, RandomizedDelaySec=1h, RemainAfterElapse=false)
 			_, err := m.RunHostCommand("systemctl restart bootc-fetch-apply-updates.timer")
 			if err != nil {
 				return fmt.Errorf("error triggering bootc upgrade service: %w", err)
 			}
-			fmt.Printf("    ✅ Bootc upgrade started\n")
+			_, _ = fmt.Fprintf(m.writer, "    ✅ Bootc upgrade started\n")
 			return nil
 		}
 	case BOOTC_NOT_MANAGED:
-		fmt.Printf("    ℹ️ Not a bootc managed host\n")
+		_, _ = fmt.Fprintf(m.writer, "    ℹ️ Not a bootc managed host\n")
 	}
 	return nil
 }
@@ -670,4 +673,10 @@ func (m *SSHHostManager) Close() error {
 	}
 
 	return nil
+}
+
+// SetWriter sets the output writer for this SSH host manager.
+// By default, output goes to os.Stdout.
+func (m *SSHHostManager) SetWriter(w io.Writer) {
+	m.writer = w
 }

@@ -17,11 +17,16 @@ limitations under the License.
 package host
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	api "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
@@ -56,13 +61,15 @@ type ExporterHostSyncer struct {
 	debugConfigs         bool
 	exporterFilter       *regexp.Regexp
 	retryConfig          RetryConfig
+	parallelism          int
 }
 
 func NewExporterHostSyncer(cfg *config.Config,
 	tapplier *templating.TemplateApplier,
 	serviceParametersMap map[string]template.ServiceParameters,
 	dryRun, debugConfigs bool,
-	exporterFilter *regexp.Regexp) *ExporterHostSyncer {
+	exporterFilter *regexp.Regexp,
+	parallelism int) *ExporterHostSyncer {
 	return &ExporterHostSyncer{
 		cfg:                  cfg,
 		tapplier:             tapplier,
@@ -70,6 +77,7 @@ func NewExporterHostSyncer(cfg *config.Config,
 		dryRun:               dryRun,
 		debugConfigs:         debugConfigs,
 		exporterFilter:       exporterFilter,
+		parallelism:          parallelism,
 		// this provides 10 minutes of retries with a max delay of 120 seconds
 		retryConfig: RetryConfig{
 			MaxAttempts:       9,
@@ -89,7 +97,7 @@ func isExporterInstanceDead(instance *api.ExporterInstance) (bool, string) {
 }
 
 // filterExporterInstances filters instances, checks if all are dead, and handles skip printing
-func (e *ExporterHostSyncer) filterExporterInstances(hostName string, exporterInstances []*api.ExporterInstance) []*api.ExporterInstance {
+func (e *ExporterHostSyncer) filterExporterInstances(hostName string, exporterInstances []*api.ExporterInstance, out *OutputBuffer) []*api.ExporterInstance {
 	// Filter instances based on regex if provided
 	if e.exporterFilter != nil {
 		filteredInstances := make([]*api.ExporterInstance, 0, len(exporterInstances))
@@ -121,7 +129,7 @@ func (e *ExporterHostSyncer) filterExporterInstances(hostName string, exporterIn
 
 	// all instances are dead
 	if allDead {
-		fmt.Printf("\n💻  Exporter host: %s skipped - all instances dead: [%s]\n", hostName, strings.Join(deadAnnotations, ", "))
+		out.Printf("\n💻  Exporter host: %s skipped - all instances dead: [%s]\n", hostName, strings.Join(deadAnnotations, ", "))
 		return nil
 	}
 
@@ -129,13 +137,13 @@ func (e *ExporterHostSyncer) filterExporterInstances(hostName string, exporterIn
 }
 
 // processExporterInstance processes a single exporter instance
-func (e *ExporterHostSyncer) processExporterInstance(exporterInstance *api.ExporterInstance, hostSsh ssh.HostManager) error {
+func (e *ExporterHostSyncer) processExporterInstance(exporterInstance *api.ExporterInstance, hostSsh ssh.HostManager, out *OutputBuffer) error {
 	if isDead, deadAnnotation := isExporterInstanceDead(exporterInstance); isDead {
-		fmt.Printf("    📟 Exporter instance: %s skipped - dead: %s\n", exporterInstance.Name, deadAnnotation)
+		out.Printf("    📟 Exporter instance: %s skipped - dead: %s\n", exporterInstance.Name, deadAnnotation)
 		return nil
 	}
 
-	fmt.Printf("    📟 Exporter instance: %s\n", exporterInstance.Name)
+	out.Printf("    📟 Exporter instance: %s\n", exporterInstance.Name)
 	errName := "ExporterInstance:" + exporterInstance.Name
 
 	et, err := template.NewExporterInstanceTemplater(e.cfg, exporterInstance)
@@ -161,17 +169,17 @@ func (e *ExporterHostSyncer) processExporterInstance(exporterInstance *api.Expor
 	}
 
 	if e.debugConfigs {
-		fmt.Printf("--- 📄 Config Template %s\n", strings.Repeat("─", 40))
-		fmt.Printf("%s\n", tcfg.Spec.ConfigTemplate)
+		out.Printf("--- 📄 Config Template %s\n", strings.Repeat("─", 40))
+		out.Printf("%s\n", tcfg.Spec.ConfigTemplate)
 		if tcfg.Spec.SystemdContainerTemplate != "" {
-			fmt.Printf("  - ⚙️  Systemd Container Template %s\n", strings.Repeat("─", 30))
-			fmt.Printf("%s\n", tcfg.Spec.SystemdContainerTemplate)
+			out.Printf("  - ⚙️  Systemd Container Template %s\n", strings.Repeat("─", 30))
+			out.Printf("%s\n", tcfg.Spec.SystemdContainerTemplate)
 		}
 		if tcfg.Spec.SystemdServiceTemplate != "" {
-			fmt.Printf("  - 🔧 Systemd Service Template %s\n", strings.Repeat("─", 31))
-			fmt.Printf("%s\n", tcfg.Spec.SystemdServiceTemplate)
+			out.Printf("  - 🔧 Systemd Service Template %s\n", strings.Repeat("─", 31))
+			out.Printf("%s\n", tcfg.Spec.SystemdServiceTemplate)
 		}
-		fmt.Println(strings.Repeat("─", 60))
+		out.Printf("%s\n", strings.Repeat("─", 60))
 	}
 
 	return hostSsh.Apply(tcfg, e.dryRun)
@@ -203,18 +211,21 @@ func getRetryItemDescription(retryItem RetryItem) string {
 	}
 }
 
-// processExporterInstancesAndBootc processes exporter instances and adds failures to global retry queue
-func (e *ExporterHostSyncer) processExporterInstancesAndBootc(exporterInstances []*api.ExporterInstance, hostName string, renderedHost *api.ExporterHost, retryQueue *[]RetryItem) {
+// processExporterInstancesAndBootc processes exporter instances and collects failures on the OutputBuffer
+func (e *ExporterHostSyncer) processExporterInstancesAndBootc(exporterInstances []*api.ExporterInstance, hostName string, renderedHost *api.ExporterHost, out *OutputBuffer) {
 	// Create SSH connection
 	hostSsh, err := ssh.NewSSHHostManager(renderedHost)
 	if err == nil {
+		// Wire the SSH host manager to write to our buffer
+		hostSsh.SetWriter(out.Writer())
 		_, err = hostSsh.Status()
 	}
 	if err != nil {
-		fmt.Printf("    ❌ Failed to create/test SSH connection: %v\n", err)
+		out.Printf("    ❌ Failed to create/test SSH connection: %v\n", err)
+		out.MarkError()
 		// Queue all exporter instances for retry
 		for _, exporterInstance := range exporterInstances {
-			*retryQueue = append(*retryQueue, RetryItem{
+			out.AddRetryItem(RetryItem{
 				ExporterInstance: exporterInstance,
 				HostName:         hostName,
 				RenderedHost:     renderedHost,
@@ -224,7 +235,7 @@ func (e *ExporterHostSyncer) processExporterInstancesAndBootc(exporterInstances 
 			})
 		}
 		// Also queue bootc upgrade for retry
-		*retryQueue = append(*retryQueue, RetryItem{
+		out.AddRetryItem(RetryItem{
 			ExporterInstance: nil,
 			HostName:         hostName,
 			RenderedHost:     renderedHost,
@@ -241,9 +252,10 @@ func (e *ExporterHostSyncer) processExporterInstancesAndBootc(exporterInstances 
 
 	// Process exporter instances
 	for _, exporterInstance := range exporterInstances {
-		if err := e.processExporterInstance(exporterInstance, hostSsh); err != nil {
-			fmt.Printf("    ❌ Failed to process %s: %v\n", exporterInstance.Name, err)
-			*retryQueue = append(*retryQueue, RetryItem{
+		if err := e.processExporterInstance(exporterInstance, hostSsh, out); err != nil {
+			out.Printf("    ❌ Failed to process %s: %v\n", exporterInstance.Name, err)
+			out.MarkError()
+			out.AddRetryItem(RetryItem{
 				ExporterInstance: exporterInstance,
 				HostName:         hostName,
 				RenderedHost:     renderedHost,
@@ -251,13 +263,16 @@ func (e *ExporterHostSyncer) processExporterInstancesAndBootc(exporterInstances 
 				LastError:        err,
 				LastAttemptTime:  time.Now(),
 			})
+		} else {
+			out.MarkChanged()
 		}
 	}
 
 	// Handle bootc upgrade
 	if err := hostSsh.HandleBootcUpgrade(e.dryRun); err != nil {
-		fmt.Printf("    ⚠️  Bootc upgrade error: %v\n", err)
-		*retryQueue = append(*retryQueue, RetryItem{
+		out.Printf("    ⚠️  Bootc upgrade error: %v\n", err)
+		out.MarkError()
+		out.AddRetryItem(RetryItem{
 			ExporterInstance: nil,
 			HostName:         hostName,
 			RenderedHost:     renderedHost,
@@ -268,9 +283,19 @@ func (e *ExporterHostSyncer) processExporterInstancesAndBootc(exporterInstances 
 	}
 }
 
+// hostWork represents a unit of work for processing a single host
+type hostWork struct {
+	host      *api.ExporterHost
+	hostName  string
+	instances []*api.ExporterInstance
+}
+
 // processGlobalRetryQueue processes the global retry queue with exponential backoff
-func (e *ExporterHostSyncer) processGlobalRetryQueue(retryQueue []RetryItem) error {
+// Retries are parallelized by host, using the same concurrency limit as the initial pass.
+// Returns the number of items that succeeded on retry.
+func (e *ExporterHostSyncer) processGlobalRetryQueue(retryQueue []RetryItem, printer *SyncPrinter) (int32, error) {
 	var finalErrors []string
+	var totalSucceeded int32
 
 	for len(retryQueue) > 0 {
 		var nextRetryQueue []RetryItem
@@ -305,52 +330,39 @@ func (e *ExporterHostSyncer) processGlobalRetryQueue(retryQueue []RetryItem) err
 			}
 		}
 
-		// Second pass: retry items that are ready
-		for _, retryItem := range itemsToRetry {
-			fmt.Printf("🔄 Retrying %s on %s (attempt %d/%d)...\n",
-				getRetryItemDescription(retryItem), retryItem.HostName, retryItem.Attempts+1, e.retryConfig.MaxAttempts)
-
-			// Create a fresh SSH connection
-			hostSsh, err := ssh.NewSSHHostManager(retryItem.RenderedHost)
-			if err != nil {
-				fmt.Printf("❌ SSH connection failed for %s: %v\n", retryItem.HostName, err)
-				e.addToRetryQueue(&retryItem, err, &nextRetryQueue)
-				continue
-			}
-
-			defer func() {
-				_ = hostSsh.Close()
-			}()
-
-			// Test the connection
-			status, err := hostSsh.Status()
-			if err != nil {
-				fmt.Printf("❌ SSH connection test failed for %s: %v\n", retryItem.HostName, err)
-				e.addToRetryQueue(&retryItem, err, &nextRetryQueue)
-				continue
-			}
-
-			fmt.Printf("✅ SSH connection established for %s: %s\n", retryItem.HostName, status)
-
-			// Now perform the actual retry operation
-			if retryItem.ExporterInstance == nil {
-				// This was a bootc upgrade failure
-				if err := hostSsh.HandleBootcUpgrade(e.dryRun); err != nil {
-					fmt.Printf("❌ Retry failed for bootc upgrade on %s: %v\n", retryItem.HostName, err)
-					e.addToRetryQueue(&retryItem, err, &nextRetryQueue)
-				} else {
-					fmt.Printf("✅ Retry succeeded for bootc upgrade on %s\n", retryItem.HostName)
-				}
-			} else {
-				// This was an exporter instance failure
-				if err := e.processExporterInstance(retryItem.ExporterInstance, hostSsh); err != nil {
-					fmt.Printf("❌ Retry failed for %s on %s: %v\n", retryItem.ExporterInstance.Name, retryItem.HostName, err)
-					e.addToRetryQueue(&retryItem, err, &nextRetryQueue)
-				} else {
-					fmt.Printf("✅ Retry succeeded for %s on %s\n", retryItem.ExporterInstance.Name, retryItem.HostName)
-				}
-			}
+		// Group ready items by host for parallel retry
+		hostRetryGroups := make(map[string][]RetryItem)
+		for _, item := range itemsToRetry {
+			hostRetryGroups[item.HostName] = append(hostRetryGroups[item.HostName], item)
 		}
+
+		// Process host groups in parallel
+		var retryMu sync.Mutex
+		g, _ := errgroup.WithContext(context.Background())
+		if e.parallelism > 0 {
+			g.SetLimit(e.parallelism)
+		}
+
+		var roundSucceeded atomic.Int32
+		for hostName, items := range hostRetryGroups {
+			g.Go(func() error {
+				out := NewOutputBuffer(hostName, len(items))
+				out.Printf("\n🔄 Retrying %d items on %s...\n", len(items), hostName)
+
+				localRetries, succeeded := e.processRetryGroup(items, out)
+				out.Done()
+				roundSucceeded.Add(int32(succeeded))
+
+				retryMu.Lock()
+				nextRetryQueue = append(nextRetryQueue, localRetries...)
+				retryMu.Unlock()
+
+				printer.FlushBuffer(out)
+				return nil
+			})
+		}
+		_ = g.Wait()
+		totalSucceeded += roundSucceeded.Load()
 
 		retryQueue = nextRetryQueue
 
@@ -381,26 +393,99 @@ func (e *ExporterHostSyncer) processGlobalRetryQueue(retryQueue []RetryItem) err
 
 	// Return error if any instances failed after all retries
 	if len(finalErrors) > 0 {
-		return fmt.Errorf("failed to process exporter instances after retries: %s", strings.Join(finalErrors, "; "))
+		return totalSucceeded, fmt.Errorf("failed to process exporter instances after retries: %s", strings.Join(finalErrors, "; "))
 	}
 
-	return nil
+	return totalSucceeded, nil
 }
 
-// SyncExporterHosts synchronizes exporter hosts via SSH
+// processRetryGroup retries a group of items for a single host (sequential within the host).
+// Returns the remaining retry items and the number of items that succeeded.
+func (e *ExporterHostSyncer) processRetryGroup(items []RetryItem, out *OutputBuffer) ([]RetryItem, int) {
+	var localRetries []RetryItem
+	succeeded := 0
+
+	// Create a single SSH connection for all items on this host
+	var hostSsh ssh.HostManager
+	var sshErr error
+
+	if len(items) > 0 {
+		hostSsh, sshErr = ssh.NewSSHHostManager(items[0].RenderedHost)
+		if sshErr == nil {
+			hostSsh.SetWriter(out.Writer())
+			_, sshErr = hostSsh.Status()
+		}
+	}
+
+	if sshErr != nil {
+		out.Printf("❌ SSH connection failed for %s: %v\n", items[0].HostName, sshErr)
+		out.MarkError()
+		for i := range items {
+			e.addToRetryQueue(&items[i], sshErr, &localRetries)
+		}
+		return localRetries, 0
+	}
+
+	if hostSsh != nil {
+		defer func() {
+			_ = hostSsh.Close()
+		}()
+	}
+
+	for i := range items {
+		retryItem := &items[i]
+		out.Printf("  🔄 Retrying %s (attempt %d/%d)...\n",
+			getRetryItemDescription(*retryItem), retryItem.Attempts+1, e.retryConfig.MaxAttempts)
+
+		if retryItem.ExporterInstance == nil {
+			// This was a bootc upgrade failure
+			if err := hostSsh.HandleBootcUpgrade(e.dryRun); err != nil {
+				out.Printf("  ❌ Retry failed for bootc upgrade: %v\n", err)
+				out.MarkError()
+				e.addToRetryQueue(retryItem, err, &localRetries)
+			} else {
+				out.Printf("  ✅ Retry succeeded for bootc upgrade\n")
+				out.MarkChanged()
+				succeeded++
+			}
+		} else {
+			// This was an exporter instance failure
+			if err := e.processExporterInstance(retryItem.ExporterInstance, hostSsh, out); err != nil {
+				out.Printf("  ❌ Retry failed for %s: %v\n", retryItem.ExporterInstance.Name, err)
+				out.MarkError()
+				e.addToRetryQueue(retryItem, err, &localRetries)
+			} else {
+				out.Printf("  ✅ Retry succeeded for %s\n", retryItem.ExporterInstance.Name)
+				out.MarkChanged()
+				succeeded++
+			}
+		}
+	}
+
+	return localRetries, succeeded
+}
+
+// SyncExporterHosts synchronizes exporter hosts via SSH, processing hosts in parallel.
 func (e *ExporterHostSyncer) SyncExporterHosts() error {
 	fmt.Print("\n🔄 Syncing exporter hosts via SSH ===========================\n")
 
-	// Global retry queue to collect all failed instances
-	retryQueue := make([]RetryItem, 0)
+	printer := NewSyncPrinter()
 
-	// First pass: process all hosts and collect failures
+	// Pre-filter and template all hosts (fast, no SSH involved)
+	work := make([]hostWork, 0, len(e.cfg.Loaded.ExporterHosts))
 	for _, host := range e.cfg.Loaded.ExporterHosts {
 		exporterInstances := e.cfg.Loaded.GetExporterInstancesByExporterHost(host.Name)
-		exporterInstances = e.filterExporterInstances(host.Name, exporterInstances)
+
+		// Use a temporary buffer for filtering output (e.g. "all dead" messages)
+		filterOut := NewOutputBuffer(host.Name, len(exporterInstances))
+		exporterInstances = e.filterExporterInstances(host.Name, exporterInstances, filterOut)
 
 		// Skip the host if no viable exporter instances remain
 		if len(exporterInstances) == 0 {
+			// Flush any filter messages (like "all dead" skips)
+			if filterOut.buf.Len() > 0 {
+				printer.FlushBuffer(filterOut)
+			}
 			continue
 		}
 
@@ -414,19 +499,56 @@ func (e *ExporterHostSyncer) SyncExporterHosts() error {
 			fmt.Printf("    ❌ Skipping %s - no addresses\n", host.Name)
 			continue
 		}
-		fmt.Printf("\n💻  Exporter host: %s\n", hostCopy.Spec.Addresses[0])
 
-		// Process each exporter instance and add failures to global retry queue
-		e.processExporterInstancesAndBootc(exporterInstances, host.Name, hostCopy, &retryQueue)
+		work = append(work, hostWork{
+			host:      hostCopy,
+			hostName:  host.Name,
+			instances: exporterInstances,
+		})
 	}
+
+	// Process hosts in parallel
+	var retryMu sync.Mutex
+	retryQueue := make([]RetryItem, 0)
+
+	g, _ := errgroup.WithContext(context.Background())
+	if e.parallelism > 0 {
+		g.SetLimit(e.parallelism)
+	}
+
+	for _, w := range work {
+		g.Go(func() error {
+			out := NewOutputBuffer(w.host.Spec.Addresses[0], len(w.instances))
+			out.Printf("\n💻  Exporter host: %s\n", w.host.Spec.Addresses[0])
+
+			e.processExporterInstancesAndBootc(w.instances, w.hostName, w.host, out)
+			out.Done()
+
+			// Collect retry items under lock
+			retryMu.Lock()
+			retryQueue = append(retryQueue, out.retryItems...)
+			retryMu.Unlock()
+
+			// Atomically flush output for this host
+			printer.FlushBuffer(out)
+			return nil
+		})
+	}
+	_ = g.Wait()
 
 	// Second pass: retry all failed instances globally
 	if len(retryQueue) > 0 {
-		fmt.Printf("\n🔄 Processing retry queue (%d failed instances) ===========================\n", len(retryQueue))
-		if err := e.processGlobalRetryQueue(retryQueue); err != nil {
+		retryTotal := int32(len(retryQueue))
+		fmt.Printf("\n🔄 Processing retry queue (%d failed items) ===========================\n", retryTotal)
+		retrySucceeded, err := e.processGlobalRetryQueue(retryQueue, printer)
+		printer.AddRetryStats(retryTotal, retrySucceeded)
+		if err != nil {
 			return fmt.Errorf("error syncing exporter hosts: %w", err)
 		}
 	}
+
+	// Print final summary
+	printer.PrintSummary()
 
 	return nil
 }

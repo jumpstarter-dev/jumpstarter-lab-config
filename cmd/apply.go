@@ -46,6 +46,7 @@ var applyCmd = &cobra.Command{
 		filterClients, _ := cmd.Flags().GetString("filter-clients")
 		filterExporters, _ := cmd.Flags().GetString("filter-exporters")
 		printCredentials, _ := cmd.Flags().GetBool("print-exporter-credentials")
+		parallel, _ := cmd.Flags().GetInt("parallel")
 
 		// Determine config file path
 		configFilePath := defaultConfigFile
@@ -123,7 +124,7 @@ var applyCmd = &cobra.Command{
 		}
 
 		exporterHostSyncer := host.NewExporterHostSyncer(cfg, tapplier, serviceParametersMap, dryRun, debugConfigs,
-			exporterFilter)
+			exporterFilter, parallel)
 
 		err = exporterHostSyncer.SyncExporterHosts()
 		if err != nil {
@@ -143,6 +144,7 @@ func init() {
 	applyCmd.Flags().String("filter-clients", "", "Regexp pattern to filter clients by name")
 	applyCmd.Flags().String("filter-exporters", "", "Regexp pattern to filter exporters by name")
 	applyCmd.Flags().Bool("print-exporter-credentials", false, "Print connection details for exporters")
+	applyCmd.Flags().Int("parallel", 10, "Number of hosts to process in parallel during ssh operation (0 for sequential)")
 
 	rootCmd.AddCommand(applyCmd)
 }
