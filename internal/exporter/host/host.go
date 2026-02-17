@@ -90,10 +90,18 @@ func NewExporterHostSyncer(cfg *config.Config,
 
 // isExporterInstanceDead checks if an exporter instance is marked as dead via annotation
 func isExporterInstanceDead(instance *api.ExporterInstance) (bool, string) {
-	if deadAnnotation, exists := instance.Annotations["dead"]; exists {
-		return true, deadAnnotation
+	return instance.IsDead()
+}
+
+func isExporterInstanceUnmanaged(instance *api.ExporterInstance) (bool, string) {
+	return instance.IsUnmanaged()
+}
+
+func unmanagedReason(annotation string) string {
+	if annotation == "" {
+		return "missing discovery date"
 	}
-	return false, ""
+	return annotation
 }
 
 // filterExporterInstances filters instances, checks if all are dead, and handles skip printing
@@ -114,34 +122,42 @@ func (e *ExporterHostSyncer) filterExporterInstances(hostName string, exporterIn
 		return nil
 	}
 
-	// Check if all remaining instances are dead
-	allDead := true
-	var deadAnnotations []string
+	activeInstances := make([]*api.ExporterInstance, 0, len(exporterInstances))
+	inactiveReasons := make([]string, 0, len(exporterInstances))
 
 	for _, exporterInstance := range exporterInstances {
-		if isDead, deadAnnotation := isExporterInstanceDead(exporterInstance); isDead {
-			deadAnnotations = append(deadAnnotations, fmt.Sprintf("%s: %s", exporterInstance.Name, deadAnnotation))
-		} else {
-			allDead = false
-			break
+		if exporterInstance == nil {
+			continue
 		}
+
+		if isDead, deadAnnotation := isExporterInstanceDead(exporterInstance); isDead {
+			out.Printf("    📟 Exporter instance: %s skipped - dead: %s\n", exporterInstance.Name, deadAnnotation)
+			inactiveReasons = append(inactiveReasons, fmt.Sprintf("%s dead: %s", exporterInstance.Name, deadAnnotation))
+			continue
+		}
+
+		if isUnmanaged, unmanagedAnnotation := isExporterInstanceUnmanaged(exporterInstance); isUnmanaged {
+			reason := unmanagedReason(unmanagedAnnotation)
+			out.Printf("    📟 Exporter instance: %s skipped - unmanaged: %s\n", exporterInstance.Name, reason)
+			inactiveReasons = append(inactiveReasons, fmt.Sprintf("%s unmanaged: %s", exporterInstance.Name, reason))
+			continue
+		}
+
+		activeInstances = append(activeInstances, exporterInstance)
 	}
 
-	// all instances are dead
-	if allDead {
-		out.Printf("\n💻  Exporter host: %s skipped - all instances dead: [%s]\n", hostName, strings.Join(deadAnnotations, ", "))
+	// all instances are dead/unmanaged
+	if len(activeInstances) == 0 && len(inactiveReasons) > 0 {
+		out.Printf("\n💻  Exporter host: %s skipped - all instances inactive: [%s]\n", hostName, strings.Join(inactiveReasons, ", "))
 		return nil
 	}
 
-	return exporterInstances
+	return activeInstances
 }
 
 // processExporterInstance processes a single exporter instance
 func (e *ExporterHostSyncer) processExporterInstance(exporterInstance *api.ExporterInstance, hostSsh ssh.HostManager, out *OutputBuffer) error {
-	if isDead, deadAnnotation := isExporterInstanceDead(exporterInstance); isDead {
-		out.Printf("    📟 Exporter instance: %s skipped - dead: %s\n", exporterInstance.Name, deadAnnotation)
-		return nil
-	}
+	// filterExporterInstances only passes active (non-dead, managed) instances here.
 
 	out.Printf("    📟 Exporter instance: %s\n", exporterInstance.Name)
 	errName := "ExporterInstance:" + exporterInstance.Name

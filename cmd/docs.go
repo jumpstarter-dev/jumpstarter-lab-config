@@ -537,8 +537,8 @@ func formatLocation(exporterInstance *v1alpha1.ExporterInstance) string {
 func formatNotes(exporterInstance *v1alpha1.ExporterInstance) string {
 	var noteParts []string
 
-	// Check for "dead" annotation and add to notes FIRST
-	if deadAnnotation, exists := exporterInstance.Annotations["dead"]; exists {
+	// Check for dead annotation and add to notes FIRST
+	if isDead, deadAnnotation := exporterInstance.IsDead(); isDead {
 		deadNote := "**DEAD**"
 		if deadAnnotation != "" {
 			deadNote += ": " + deadAnnotation

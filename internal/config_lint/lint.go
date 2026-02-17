@@ -77,6 +77,13 @@ func validateTemplates(cfg *config.Config) map[string][]error {
 	// TODO: Implement template validation logic
 	// This is a placeholder for template validation functionality
 	for _, exporterInstance := range cfg.Loaded.GetExporterInstances() {
+		if exporterInstance == nil {
+			continue
+		}
+		if isUnmanaged, _ := exporterInstance.IsUnmanaged(); isUnmanaged {
+			continue
+		}
+
 		// Template validation logic would go here
 		// For now, this is just a placeholder that doesn't report any errors
 		if exporterInstance.HasConfigTemplate() {
@@ -136,6 +143,13 @@ func validateReferences(cfg *config.Config) map[string][]error {
 
 	// Validate ExporterInstance references
 	for name, instance := range cfg.Loaded.GetExporterInstances() {
+		if instance == nil {
+			continue
+		}
+		if isUnmanaged, _ := instance.IsUnmanaged(); isUnmanaged {
+			continue
+		}
+
 		sourceFile := getSourceFile("ExporterInstance", name)
 
 		// Check DutLocationRef
