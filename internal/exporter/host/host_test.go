@@ -47,7 +47,7 @@ func TestDeadAnnotationFiltering(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "instance2",
 						Annotations: map[string]string{
-							"dead": "true",
+							v1alpha1.DeadAnnotation: "true",
 						},
 					},
 				},
@@ -62,7 +62,7 @@ func TestDeadAnnotationFiltering(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "instance1",
 						Annotations: map[string]string{
-							"dead": "true",
+							v1alpha1.DeadAnnotation: "true",
 						},
 					},
 				},
@@ -70,7 +70,7 @@ func TestDeadAnnotationFiltering(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "instance2",
 						Annotations: map[string]string{
-							"dead": "true",
+							v1alpha1.DeadAnnotation: "true",
 						},
 					},
 				},
@@ -85,7 +85,7 @@ func TestDeadAnnotationFiltering(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "instance1",
 						Annotations: map[string]string{
-							"dead": "false",
+							v1alpha1.DeadAnnotation: "false",
 						},
 					},
 				},
@@ -100,7 +100,7 @@ func TestDeadAnnotationFiltering(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "instance1",
 						Annotations: map[string]string{
-							"dead": "maybe",
+							v1alpha1.DeadAnnotation: "maybe",
 						},
 					},
 				},
@@ -117,7 +117,7 @@ func TestDeadAnnotationFiltering(t *testing.T) {
 			deadCount := 0
 
 			for _, exporterInstance := range tt.exporterInstances {
-				if _, exists := exporterInstance.Annotations["dead"]; exists {
+				if isDead, _ := exporterInstance.IsDead(); isDead {
 					deadCount++
 				} else {
 					aliveInstances = append(aliveInstances, exporterInstance)
@@ -150,7 +150,7 @@ func TestHostSkippingBehavior(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "dead-instance",
 						Annotations: map[string]string{
-							"dead": "true",
+							v1alpha1.DeadAnnotation: "true",
 						},
 					},
 				},
@@ -166,7 +166,7 @@ func TestHostSkippingBehavior(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "dead-instance-1",
 						Annotations: map[string]string{
-							"dead": "true",
+							v1alpha1.DeadAnnotation: "true",
 						},
 					},
 				},
@@ -174,7 +174,7 @@ func TestHostSkippingBehavior(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "dead-instance-2",
 						Annotations: map[string]string{
-							"dead": "true",
+							v1alpha1.DeadAnnotation: "true",
 						},
 					},
 				},
@@ -211,7 +211,7 @@ func TestHostSkippingBehavior(t *testing.T) {
 			aliveCount := 0
 
 			for _, exporterInstance := range tt.exporterInstances {
-				if _, exists := exporterInstance.Annotations["dead"]; !exists {
+				if isDead, _ := exporterInstance.IsDead(); !isDead {
 					allDead = false
 					aliveCount++
 				}
@@ -371,4 +371,108 @@ func TestFormatDuration(t *testing.T) {
 			assert.Equal(t, tt.expected, formatDuration(tt.duration))
 		})
 	}
+}
+
+func TestIsExporterInstanceUnmanaged(t *testing.T) {
+	tests := []struct {
+		name          string
+		instance      *v1alpha1.ExporterInstance
+		expectedState bool
+		expectedValue string
+	}{
+		{
+			name: "managed exporter",
+			instance: &v1alpha1.ExporterInstance{
+				ObjectMeta: metav1.ObjectMeta{Name: "managed"},
+			},
+			expectedState: false,
+			expectedValue: "",
+		},
+		{
+			name: "unmanaged exporter with empty value",
+			instance: &v1alpha1.ExporterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "unmanaged-empty",
+					Annotations: map[string]string{
+						v1alpha1.UnmanagedAnnotation: "",
+					},
+				},
+			},
+			expectedState: true,
+			expectedValue: "",
+		},
+		{
+			name: "unmanaged exporter with discovery date",
+			instance: &v1alpha1.ExporterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "unmanaged-dated",
+					Annotations: map[string]string{
+						v1alpha1.UnmanagedAnnotation: "2026-02-01",
+					},
+				},
+			},
+			expectedState: true,
+			expectedValue: "2026-02-01",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isUnmanaged, value := isExporterInstanceUnmanaged(tt.instance)
+			assert.Equal(t, tt.expectedState, isUnmanaged)
+			assert.Equal(t, tt.expectedValue, value)
+		})
+	}
+}
+
+func TestFilterExporterInstances_SkipsUnmanaged(t *testing.T) {
+	syncer := &ExporterHostSyncer{}
+
+	t.Run("mixed managed and unmanaged", func(t *testing.T) {
+		instances := []*v1alpha1.ExporterInstance{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "managed",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "unmanaged",
+					Annotations: map[string]string{
+						v1alpha1.UnmanagedAnnotation: "2026-02-10",
+					},
+				},
+			},
+		}
+
+		out := NewOutputBuffer("host-1", len(instances))
+		filtered := syncer.filterExporterInstances("host-1", instances, out)
+		assert.Len(t, filtered, 1)
+		assert.Equal(t, "managed", filtered[0].Name)
+	})
+
+	t.Run("all unmanaged", func(t *testing.T) {
+		instances := []*v1alpha1.ExporterInstance{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "unmanaged-1",
+					Annotations: map[string]string{
+						v1alpha1.UnmanagedAnnotation: "2026-02-10",
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "unmanaged-2",
+					Annotations: map[string]string{
+						v1alpha1.UnmanagedAnnotation: "",
+					},
+				},
+			},
+		}
+
+		out := NewOutputBuffer("host-1", len(instances))
+		filtered := syncer.filterExporterInstances("host-1", instances, out)
+		assert.Nil(t, filtered)
+	})
 }

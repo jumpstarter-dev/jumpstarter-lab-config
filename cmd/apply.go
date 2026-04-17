@@ -19,7 +19,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -29,6 +31,7 @@ import (
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/exporter/template"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/instance"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/templating"
+	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/unmanaged"
 )
 
 var applyCmd = &cobra.Command{
@@ -61,6 +64,7 @@ var applyCmd = &cobra.Command{
 		}
 
 		config_lint.Validate(cfg)
+		unmanagedSummary := unmanaged.ProcessUnmanagedExporters(cfg, dryRun, time.Now)
 
 		tapplier, err := templating.NewTemplateApplier(cfg, nil)
 		if err != nil {
@@ -112,7 +116,12 @@ var applyCmd = &cobra.Command{
 				return fmt.Errorf("error syncing clients for %s: %w", inst.Name, err)
 			}
 
-			instanceServiceParametersMap, err := instanceClient.SyncExporters(context.Background(), cfg, exporterFilter)
+			instanceServiceParametersMap, err := instanceClient.SyncExporters(
+				context.Background(),
+				cfg,
+				exporterFilter,
+				unmanagedSummary.Exporters,
+			)
 			if err != nil {
 				return fmt.Errorf("error syncing exporters for %s: %w", inst.Name, err)
 			} else {
@@ -129,6 +138,23 @@ var applyCmd = &cobra.Command{
 		err = exporterHostSyncer.SyncExporterHosts()
 		if err != nil {
 			return fmt.Errorf("error syncing exporter hosts: %w", err)
+		}
+
+		if unmanagedSummary.Count() > 0 {
+			if unmanagedSummary.OldestDays > 0 {
+				_, _ = fmt.Fprintf(
+					os.Stderr,
+					"\n⚠️  Warning: %d exporter(s) are unmanaged (oldest: %d day(s)). "+
+						"They were skipped for sync.\n",
+					unmanagedSummary.Count(), unmanagedSummary.OldestDays,
+				)
+			} else {
+				_, _ = fmt.Fprintf(
+					os.Stderr,
+					"\n⚠️  Warning: %d exporter(s) are unmanaged. They were skipped for sync.\n",
+					unmanagedSummary.Count(),
+				)
+			}
 		}
 
 		return nil

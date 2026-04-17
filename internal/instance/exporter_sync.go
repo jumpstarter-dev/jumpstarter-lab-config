@@ -255,7 +255,7 @@ func (i *Instance) getGrpcEndpoint(exporterName string, cfg *config.Config) (str
 	return "", fmt.Errorf("exporter instance %s not found in config", exporterName)
 }
 
-func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config, filter *regexp.Regexp) (map[string]template.ServiceParameters, error) {
+func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config, filter *regexp.Regexp, unmanagedExporters map[string]bool) (map[string]template.ServiceParameters, error) {
 	serviceParametersMap := make(map[string]template.ServiceParameters)
 	fmt.Printf("\n🔄 [%s] Syncing exporters ===========================\n\n", i.config.Name)
 	instanceExporters, err := i.listExporters(ctx)
@@ -263,45 +263,35 @@ func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config, filter
 		return nil, fmt.Errorf("[%s] failed to list exporters: %w", i.config.Name, err)
 	}
 
-	// convert configExporterMap to a map of exporter name to exporter objects
-	configExporterMap := make(map[string]v1alpha1.Exporter)
-	for _, cfgExporterInstance := range cfg.Loaded.ExporterInstances {
-		exporterObj, err := GetExporterObjectForInstance(cfg, cfgExporterInstance, i.config.Name)
-		if err != nil {
-			return nil, fmt.Errorf("[%s] failed to get exporter object for instance %s: %w", i.config.Name, cfgExporterInstance.Name, err)
-		}
-		if exporterObj != nil {
-			configExporterMap[cfgExporterInstance.Name] = *exporterObj
-		}
+	configExporterMap, err := buildConfigExporterMap(cfg, i.config.Name, unmanagedExporters)
+	if err != nil {
+		return nil, fmt.Errorf("[%s] failed to build exporter config map: %w", i.config.Name, err)
 	}
 
-	// Apply filter if provided
-	if filter != nil {
-		filteredInstanceItems := []v1alpha1.Exporter{}
-		for _, item := range instanceExporters.Items {
-			if filter.MatchString(item.Name) {
-				filteredInstanceItems = append(filteredInstanceItems, item)
-			}
-		}
-		instanceExporters.Items = filteredInstanceItems
-
-		filteredConfigExporterMap := make(map[string]v1alpha1.Exporter)
-		for name, exporterObj := range configExporterMap {
-			if filter.MatchString(name) {
-				filteredConfigExporterMap[name] = exporterObj
-			}
-		}
-		configExporterMap = filteredConfigExporterMap
-	}
+	instanceExporterItems := instanceExporters.Items
+	configExporterMap, instanceExporterItems = applyExporterFilter(filter, instanceExporterItems, configExporterMap)
 
 	// create a exporterMap from exporters in the cluster
 	instanceExporterMap := make(map[string]v1alpha1.Exporter)
-	for _, instExporter := range instanceExporters.Items {
+	for _, instExporter := range instanceExporterItems {
 		instanceExporterMap[instExporter.Name] = instExporter
 	}
 
+	loggedUnmanagedSkips := make(map[string]bool)
+	logUnmanagedSkip := func(name string) {
+		if loggedUnmanagedSkips[name] {
+			return
+		}
+		fmt.Printf("⏸️  [%s] Skipping unmanaged exporter %s for sync\n", i.config.Name, name)
+		loggedUnmanagedSkips[name] = true
+	}
+
 	// delete exporters that are not in config
-	for _, instanceExporter := range instanceExporters.Items {
+	for _, instanceExporter := range instanceExporterItems {
+		if isUnmanagedExporter(instanceExporter.Name, unmanagedExporters) {
+			logUnmanagedSkip(instanceExporter.Name)
+			continue
+		}
 		if _, ok := configExporterMap[instanceExporter.Name]; !ok {
 			err := i.deleteExporter(ctx, instanceExporter.Name)
 			if err != nil {
@@ -348,7 +338,12 @@ func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config, filter
 	}
 
 	// update exporters that are in both config and instance
-	for _, instanceExporter := range instanceExporters.Items {
+	for _, instanceExporter := range instanceExporterItems {
+		if isUnmanagedExporter(instanceExporter.Name, unmanagedExporters) {
+			logUnmanagedSkip(instanceExporter.Name)
+			continue
+		}
+
 		if exporterObj, ok := configExporterMap[instanceExporter.Name]; ok {
 
 			err := i.updateExporter(ctx, &instanceExporter, &exporterObj)
@@ -373,6 +368,57 @@ func (i *Instance) SyncExporters(ctx context.Context, cfg *config.Config, filter
 	}
 
 	return serviceParametersMap, nil
+}
+
+func buildConfigExporterMap(cfg *config.Config, jumpstarterInstance string, unmanagedExporters map[string]bool) (map[string]v1alpha1.Exporter, error) {
+	configExporterMap := make(map[string]v1alpha1.Exporter)
+	for _, cfgExporterInstance := range cfg.Loaded.ExporterInstances {
+		if cfgExporterInstance == nil {
+			continue
+		}
+		if isUnmanagedExporter(cfgExporterInstance.Name, unmanagedExporters) {
+			continue
+		}
+
+		exporterObj, err := GetExporterObjectForInstance(cfg, cfgExporterInstance, jumpstarterInstance)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get exporter object for instance %s: %w", cfgExporterInstance.Name, err)
+		}
+		if exporterObj != nil {
+			configExporterMap[cfgExporterInstance.Name] = *exporterObj
+		}
+	}
+	return configExporterMap, nil
+}
+
+func applyExporterFilter(
+	filter *regexp.Regexp,
+	instanceExporterItems []v1alpha1.Exporter,
+	configExporterMap map[string]v1alpha1.Exporter,
+) (map[string]v1alpha1.Exporter, []v1alpha1.Exporter) {
+	if filter == nil {
+		return configExporterMap, instanceExporterItems
+	}
+
+	filteredInstanceItems := make([]v1alpha1.Exporter, 0, len(instanceExporterItems))
+	for _, item := range instanceExporterItems {
+		if filter.MatchString(item.Name) {
+			filteredInstanceItems = append(filteredInstanceItems, item)
+		}
+	}
+
+	filteredConfigExporterMap := make(map[string]v1alpha1.Exporter)
+	for name, exporterObj := range configExporterMap {
+		if filter.MatchString(name) {
+			filteredConfigExporterMap[name] = exporterObj
+		}
+	}
+
+	return filteredConfigExporterMap, filteredInstanceItems
+}
+
+func isUnmanagedExporter(name string, unmanagedExporters map[string]bool) bool {
+	return unmanagedExporters[name]
 }
 
 func GetExporterObjectForInstance(cfg *config.Config, e *v1alpha1Config.ExporterInstance, jumpstarterInstance string) (*v1alpha1.Exporter, error) {

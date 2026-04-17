@@ -214,3 +214,72 @@ func TestLint(t *testing.T) {
 		assert.True(t, hasInvalidExporterError && len(invalidExporterErrors) > 0, "Should have errors for invalid exporter with missing template")
 	})
 }
+
+func TestValidateTemplates_SkipsUnmanagedExporters(t *testing.T) {
+	cfg := &config.Config{
+		Loaded: &config.LoadedLabConfig{
+			ExporterInstances: map[string]*v1alphaConfig.ExporterInstance{
+				"unmanaged-exporter": {
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "unmanaged-exporter",
+						Annotations: map[string]string{
+							v1alphaConfig.UnmanagedAnnotation: "2026-02-01",
+						},
+					},
+					Spec: v1alphaConfig.ExporterInstanceSpec{
+						ConfigTemplateRef: v1alphaConfig.ConfigTemplateRef{
+							Name: "missing-template",
+						},
+					},
+				},
+			},
+			ExporterConfigTemplates: map[string]*v1alphaConfig.ExporterConfigTemplate{},
+		},
+	}
+
+	errorsByItem := validateTemplates(cfg)
+	assert.Empty(t, errorsByItem)
+}
+
+func TestValidateReferences_SkipsUnmanagedExporters(t *testing.T) {
+	cfg := &config.Config{
+		Loaded: &config.LoadedLabConfig{
+			ExporterInstances: map[string]*v1alphaConfig.ExporterInstance{
+				"unmanaged-exporter": {
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "unmanaged-exporter",
+						Annotations: map[string]string{
+							v1alphaConfig.UnmanagedAnnotation: "2026-02-01",
+						},
+					},
+					Spec: v1alphaConfig.ExporterInstanceSpec{
+						DutLocationRef: v1alphaConfig.DutLocationRef{
+							Name: "missing-location",
+						},
+						ExporterHostRef: v1alphaConfig.ExporterHostRef{
+							Name: "missing-host",
+						},
+						JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
+							Name: "missing-jumpstarter-instance",
+						},
+						ConfigTemplateRef: v1alphaConfig.ConfigTemplateRef{
+							Name: "missing-template",
+						},
+					},
+				},
+			},
+			PhysicalLocations:       map[string]*v1alphaConfig.PhysicalLocation{},
+			ExporterHosts:           map[string]*v1alphaConfig.ExporterHost{},
+			JumpstarterInstances:    map[string]*v1alphaConfig.JumpstarterInstance{},
+			ExporterConfigTemplates: map[string]*v1alphaConfig.ExporterConfigTemplate{},
+			SourceFiles: map[string]map[string]string{
+				"ExporterInstance": {
+					"unmanaged-exporter": "test-exporter.yaml",
+				},
+			},
+		},
+	}
+
+	errorsByFile := validateReferences(cfg)
+	assert.Empty(t, errorsByFile)
+}
