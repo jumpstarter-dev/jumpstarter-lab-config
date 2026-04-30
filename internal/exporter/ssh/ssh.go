@@ -32,6 +32,7 @@ const (
 
 const (
 	noValuePlaceholder = "<no value>"
+	systemdStateActive = "active"
 )
 
 type HostManager interface {
@@ -237,7 +238,6 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 
 	if changedExporterConfig || changedContainer || changedService {
 		if !dryRun {
-			// Apply the changes: reload systemd, enable service and restart the exporter
 			_, err := m.runCommand("systemctl daemon-reload")
 			if err != nil {
 				return fmt.Errorf("failed to reload systemd: %w", err)
@@ -248,12 +248,27 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 					return fmt.Errorf("failed to enable exporter: %w", err)
 				}
 			}
-			restartGracefully(svcName, dryRun)
+
+			statusResult, _ := m.runCommand("systemctl is-active " + fmt.Sprintf("%q", svcName))
+			serviceRunning := statusResult != nil && statusResult.ExitCode == 0 && strings.TrimSpace(statusResult.Stdout) == systemdStateActive
+
+			if serviceRunning {
+				restartGracefully(svcName, dryRun)
+			} else {
+				_, startErr := m.runCommand("systemctl start " + fmt.Sprintf("%q", svcName))
+				if startErr != nil {
+					_, _ = fmt.Fprintf(m.writer, "        ❌ Failed to start service %s: %v\n", svcName, startErr)
+				} else {
+					_, _ = fmt.Fprintf(m.writer, "        ✅ Service %s started\n", svcName)
+				}
+			}
+		} else {
+			_, _ = fmt.Fprintf(m.writer, "        📄 Would reload systemd and start/restart %s\n", svcName)
 		}
 	} else {
 		// Check if service is running and start if needed
 		statusResult, err := m.runCommand("systemctl is-active " + fmt.Sprintf("%q", svcName))
-		serviceRunning := err == nil && statusResult.Stdout == "active\n"
+		serviceRunning := err == nil && strings.TrimSpace(statusResult.Stdout) == systemdStateActive
 
 		if !serviceRunning {
 			_, _ = fmt.Fprintf(m.writer, "        ⚠️ Service %s is not running...\n", svcName)
@@ -526,8 +541,8 @@ func (m *SSHHostManager) GetBootcStatus() BootcStatus {
 	if statusCmd != nil {
 		statuses := strings.Fields(statusCmd.Stdout)
 		if len(statuses) == 2 &&
-			(statuses[0] == "active" || statuses[0] == "activating" ||
-				statuses[1] == "active" || statuses[1] == "activating") {
+			(statuses[0] == systemdStateActive || statuses[0] == "activating" ||
+				statuses[1] == systemdStateActive || statuses[1] == "activating") {
 			return BOOTC_UPDATING
 		}
 	}
