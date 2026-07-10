@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"strings"
 
-	jsApi "github.com/jumpstarter-dev/jumpstarter-controller/api/v1alpha1"
+	jsApi "github.com/jumpstarter-dev/jumpstarter/controller/api/v1alpha1"
 	api "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/container"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/vars"
