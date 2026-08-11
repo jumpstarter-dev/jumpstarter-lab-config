@@ -858,7 +858,7 @@ func TestGetExporterObjectForInstance(t *testing.T) {
 			expectedError: false,
 		},
 		{
-			name: "exporter instance with spec.enabled false strips deprecated label",
+			name: "exporter instance with spec.enabled false",
 			exporterInstance: &v1alphaConfig.ExporterInstance{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-exporter-disabled",
@@ -870,8 +870,7 @@ func TestGetExporterObjectForInstance(t *testing.T) {
 						Name: "target-instance",
 					},
 					Labels: map[string]string{
-						"app":     "test",
-						"enabled": "false",
+						"app": "test",
 					},
 				},
 			},

@@ -442,9 +442,6 @@ func GetExporterObjectForInstance(cfg *config.Config, e *v1alpha1Config.Exporter
 			}
 		}
 
-		// Drop deprecated labels.enabled; lease eligibility is Exporter.spec.enabled only.
-		metadata.Labels = stripEnabledLabel(metadata.Labels)
-
 		return &v1alpha1.Exporter{
 			TypeMeta:   e.TypeMeta,
 			ObjectMeta: *metadata,
@@ -455,21 +452,6 @@ func GetExporterObjectForInstance(cfg *config.Config, e *v1alpha1Config.Exporter
 		}, nil
 	}
 	return nil, nil
-}
-
-// stripEnabledLabel returns a copy of labels without the deprecated enabled key.
-func stripEnabledLabel(labels map[string]string) map[string]string {
-	if labels == nil {
-		return nil
-	}
-	out := make(map[string]string, len(labels))
-	for k, v := range labels {
-		if k == "enabled" {
-			continue
-		}
-		out[k] = v
-	}
-	return out
 }
 
 // isConflictError checks if an error is a Kubernetes conflict error
