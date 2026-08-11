@@ -9,10 +9,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
-	"github.com/jumpstarter-dev/jumpstarter/controller/api/v1alpha1"
 	v1alpha1Config "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/exporter/template"
+	"github.com/jumpstarter-dev/jumpstarter/controller/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 

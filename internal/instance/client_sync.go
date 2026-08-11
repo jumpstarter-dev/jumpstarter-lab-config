@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/jumpstarter-dev/jumpstarter/controller/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
+	"github.com/jumpstarter-dev/jumpstarter/controller/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
