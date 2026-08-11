@@ -7,9 +7,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/jumpstarter-dev/jumpstarter-controller/api/v1alpha1"
 	v1alphaConfig "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
+	"github.com/jumpstarter-dev/jumpstarter/controller/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

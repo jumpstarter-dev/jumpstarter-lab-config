@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/charmbracelet/glamour v0.10.0
 	github.com/google/go-cmp v0.7.0
-	github.com/jumpstarter-dev/jumpstarter-controller v0.5.1-0.20250606161717-bc276583f2c6
+	github.com/jumpstarter-dev/jumpstarter/controller v0.0.0-20260805091501-c18ac8521398
 	github.com/mattn/go-runewidth v0.0.16
 	github.com/pkg/sftp v1.13.9
 	github.com/spf13/cobra v1.8.1
@@ -94,6 +94,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
-
-// jumpstarter-controller repo is deprecated; source moved to jumpstarter monorepo (v0.9.0-rc.1)
-replace github.com/jumpstarter-dev/jumpstarter-controller => github.com/jumpstarter-dev/jumpstarter/controller v0.0.0-20260626134506-78777b5a62fe
