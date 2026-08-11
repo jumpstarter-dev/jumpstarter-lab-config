@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 func TestNewInstance(t *testing.T) {
@@ -365,10 +366,6 @@ func TestPrintDiff(t *testing.T) {
 }
 
 var testUsername = "test-user"
-
-func boolPtr(v bool) *bool {
-	return &v
-}
 
 func TestCheckAndPrintDiff(t *testing.T) {
 	// Create a test instance to use for the checkAndPrintDiff method
@@ -865,7 +862,7 @@ func TestGetExporterObjectForInstance(t *testing.T) {
 				},
 				Spec: v1alphaConfig.ExporterInstanceSpec{
 					Username: testUsername,
-					Enabled:  boolPtr(false),
+					Enabled:  ptr.To(false),
 					JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
 						Name: "target-instance",
 					},
@@ -884,7 +881,7 @@ func TestGetExporterObjectForInstance(t *testing.T) {
 				},
 				Spec: v1alpha1.ExporterSpec{
 					Username: &testUsername,
-					Enabled:  boolPtr(false),
+					Enabled:  ptr.To(false),
 				},
 			},
 			expectedError: false,
