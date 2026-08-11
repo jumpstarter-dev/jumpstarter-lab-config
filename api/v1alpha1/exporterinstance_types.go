@@ -29,8 +29,7 @@ type ExporterInstanceSpec struct {
 	Username string `json:"username,omitempty"`
 	// Enabled controls lease eligibility for the exporter (soft switch).
 	// When false, the exporter stays registered/online but gets no new leases.
-	// nil is treated as enabled by the controller. When unset here, falls back
-	// to the deprecated labels.enabled value, then defaults to true.
+	// nil is treated as enabled by the controller.
 	Enabled                *bool                  `json:"enabled,omitempty"`
 	DutLocationRef         DutLocationRef         `json:"dutLocationRef,omitempty"`
 	ExporterHostRef        ExporterHostRef        `json:"exporterHostRef,omitempty"`

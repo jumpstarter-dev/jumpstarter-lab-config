@@ -891,39 +891,6 @@ func TestGetExporterObjectForInstance(t *testing.T) {
 			expectedError: false,
 		},
 		{
-			name: "exporter instance falls back to labels.enabled",
-			exporterInstance: &v1alphaConfig.ExporterInstance{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-exporter-label-disabled",
-				},
-				Spec: v1alphaConfig.ExporterInstanceSpec{
-					Username: testUsername,
-					JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
-						Name: "target-instance",
-					},
-					Labels: map[string]string{
-						"app":     "test",
-						"enabled": "false",
-					},
-				},
-			},
-			jumpstarterInstance: "target-instance",
-			expectedExporter: &v1alpha1.Exporter{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-exporter-label-disabled",
-					Labels: map[string]string{
-						"app":     "test",
-						"enabled": "false",
-					},
-				},
-				Spec: v1alpha1.ExporterSpec{
-					Username: &testUsername,
-					Enabled:  boolPtr(false),
-				},
-			},
-			expectedError: false,
-		},
-		{
 			name: "exporter instance with matching jumpstarter instance and config template",
 			exporterInstance: &v1alphaConfig.ExporterInstance{
 				ObjectMeta: metav1.ObjectMeta{

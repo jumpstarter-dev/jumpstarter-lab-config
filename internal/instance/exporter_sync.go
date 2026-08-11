@@ -442,44 +442,19 @@ func GetExporterObjectForInstance(cfg *config.Config, e *v1alpha1Config.Exporter
 			}
 		}
 
-		enabled := resolveExporterEnabled(e, metadata.Labels)
-		// When using the new field, drop the deprecated label from the Exporter CR.
-		// Keep labels.enabled when that is still the source, so existing selectors keep working.
-		if e.Spec.Enabled != nil {
-			metadata.Labels = stripEnabledLabel(metadata.Labels)
-		}
+		// Drop deprecated labels.enabled; lease eligibility is Exporter.spec.enabled only.
+		metadata.Labels = stripEnabledLabel(metadata.Labels)
 
 		return &v1alpha1.Exporter{
 			TypeMeta:   e.TypeMeta,
 			ObjectMeta: *metadata,
 			Spec: v1alpha1.ExporterSpec{
 				Username: &e.Spec.Username,
-				Enabled:  enabled,
+				Enabled:  e.Spec.Enabled,
 			},
 		}, nil
 	}
 	return nil, nil
-}
-
-// resolveExporterEnabled returns Exporter.spec.enabled from ExporterInstance.spec.enabled,
-// falling back to the deprecated labels.enabled string for compatibility.
-func resolveExporterEnabled(e *v1alpha1Config.ExporterInstance, labels map[string]string) *bool {
-	if e.Spec.Enabled != nil {
-		return e.Spec.Enabled
-	}
-	if labels == nil {
-		return nil
-	}
-	switch labels["enabled"] {
-	case "false", "False":
-		enabled := false
-		return &enabled
-	case "true", "True":
-		enabled := true
-		return &enabled
-	default:
-		return nil
-	}
 }
 
 // stripEnabledLabel returns a copy of labels without the deprecated enabled key.
