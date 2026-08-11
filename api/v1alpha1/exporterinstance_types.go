@@ -25,8 +25,12 @@ type ExporterInstanceSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	Type                   string                 `json:"type,omitempty"`
-	Username               string                 `json:"username,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Username string `json:"username,omitempty"`
+	// Enabled controls lease eligibility for the exporter (soft switch).
+	// When false, the exporter stays registered/online but gets no new leases.
+	// nil is treated as enabled by the controller.
+	Enabled                *bool                  `json:"enabled,omitempty"`
 	DutLocationRef         DutLocationRef         `json:"dutLocationRef,omitempty"`
 	ExporterHostRef        ExporterHostRef        `json:"exporterHostRef,omitempty"`
 	JumpstarterInstanceRef JumsptarterInstanceRef `json:"jumpstarterInstanceRef,omitempty"`

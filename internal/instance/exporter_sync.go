@@ -441,11 +441,13 @@ func GetExporterObjectForInstance(cfg *config.Config, e *v1alpha1Config.Exporter
 				return nil, fmt.Errorf("error rendering labels for ExporterInstance %s : %w", e.Name, err)
 			}
 		}
+
 		return &v1alpha1.Exporter{
 			TypeMeta:   e.TypeMeta,
 			ObjectMeta: *metadata,
 			Spec: v1alpha1.ExporterSpec{
 				Username: &e.Spec.Username,
+				Enabled:  e.Spec.Enabled,
 			},
 		}, nil
 	}

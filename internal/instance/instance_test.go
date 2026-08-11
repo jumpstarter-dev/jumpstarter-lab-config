@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 func TestNewInstance(t *testing.T) {
@@ -854,6 +855,38 @@ func TestGetExporterObjectForInstance(t *testing.T) {
 			expectedError: false,
 		},
 		{
+			name: "exporter instance with spec.enabled false",
+			exporterInstance: &v1alphaConfig.ExporterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-exporter-disabled",
+				},
+				Spec: v1alphaConfig.ExporterInstanceSpec{
+					Username: testUsername,
+					Enabled:  ptr.To(false),
+					JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
+						Name: "target-instance",
+					},
+					Labels: map[string]string{
+						"app": "test",
+					},
+				},
+			},
+			jumpstarterInstance: "target-instance",
+			expectedExporter: &v1alpha1.Exporter{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-exporter-disabled",
+					Labels: map[string]string{
+						"app": "test",
+					},
+				},
+				Spec: v1alpha1.ExporterSpec{
+					Username: &testUsername,
+					Enabled:  ptr.To(false),
+				},
+			},
+			expectedError: false,
+		},
+		{
 			name: "exporter instance with matching jumpstarter instance and config template",
 			exporterInstance: &v1alphaConfig.ExporterInstance{
 				ObjectMeta: metav1.ObjectMeta{
@@ -933,6 +966,7 @@ func TestGetExporterObjectForInstance(t *testing.T) {
 				assert.Equal(t, tt.expectedExporter.Name, result.Name, "Expected name to match")
 				assert.Equal(t, tt.expectedExporter.Labels, result.Labels, "Expected labels to match")
 				assert.Equal(t, tt.expectedExporter.Spec.Username, result.Spec.Username, "Expected username to match")
+				assert.Equal(t, tt.expectedExporter.Spec.Enabled, result.Spec.Enabled, "Expected enabled to match")
 			}
 		})
 	}
