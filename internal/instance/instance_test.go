@@ -366,6 +366,10 @@ func TestPrintDiff(t *testing.T) {
 
 var testUsername = "test-user"
 
+func boolPtr(v bool) *bool {
+	return &v
+}
+
 func TestCheckAndPrintDiff(t *testing.T) {
 	// Create a test instance to use for the checkAndPrintDiff method
 	instance := &v1alphaConfig.JumpstarterInstance{
@@ -854,6 +858,72 @@ func TestGetExporterObjectForInstance(t *testing.T) {
 			expectedError: false,
 		},
 		{
+			name: "exporter instance with spec.enabled false strips deprecated label",
+			exporterInstance: &v1alphaConfig.ExporterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-exporter-disabled",
+				},
+				Spec: v1alphaConfig.ExporterInstanceSpec{
+					Username: testUsername,
+					Enabled:  boolPtr(false),
+					JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
+						Name: "target-instance",
+					},
+					Labels: map[string]string{
+						"app":     "test",
+						"enabled": "false",
+					},
+				},
+			},
+			jumpstarterInstance: "target-instance",
+			expectedExporter: &v1alpha1.Exporter{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-exporter-disabled",
+					Labels: map[string]string{
+						"app": "test",
+					},
+				},
+				Spec: v1alpha1.ExporterSpec{
+					Username: &testUsername,
+					Enabled:  boolPtr(false),
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name: "exporter instance falls back to labels.enabled",
+			exporterInstance: &v1alphaConfig.ExporterInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-exporter-label-disabled",
+				},
+				Spec: v1alphaConfig.ExporterInstanceSpec{
+					Username: testUsername,
+					JumpstarterInstanceRef: v1alphaConfig.JumsptarterInstanceRef{
+						Name: "target-instance",
+					},
+					Labels: map[string]string{
+						"app":     "test",
+						"enabled": "false",
+					},
+				},
+			},
+			jumpstarterInstance: "target-instance",
+			expectedExporter: &v1alpha1.Exporter{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-exporter-label-disabled",
+					Labels: map[string]string{
+						"app":     "test",
+						"enabled": "false",
+					},
+				},
+				Spec: v1alpha1.ExporterSpec{
+					Username: &testUsername,
+					Enabled:  boolPtr(false),
+				},
+			},
+			expectedError: false,
+		},
+		{
 			name: "exporter instance with matching jumpstarter instance and config template",
 			exporterInstance: &v1alphaConfig.ExporterInstance{
 				ObjectMeta: metav1.ObjectMeta{
@@ -933,6 +1003,7 @@ func TestGetExporterObjectForInstance(t *testing.T) {
 				assert.Equal(t, tt.expectedExporter.Name, result.Name, "Expected name to match")
 				assert.Equal(t, tt.expectedExporter.Labels, result.Labels, "Expected labels to match")
 				assert.Equal(t, tt.expectedExporter.Spec.Username, result.Spec.Username, "Expected username to match")
+				assert.Equal(t, tt.expectedExporter.Spec.Enabled, result.Spec.Enabled, "Expected enabled to match")
 			}
 		})
 	}
