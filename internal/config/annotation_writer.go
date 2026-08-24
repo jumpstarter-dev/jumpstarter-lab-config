@@ -12,6 +12,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const yamlStrTag = "!!str"
+
 // UpdateAnnotationInSourceFile updates an annotation value in a YAML source file.
 // It uses yaml.Node for round-trip parsing to preserve comments and formatting.
 // For multi-document YAML files, it matches on metadata.name to find the correct document.
@@ -131,7 +133,7 @@ func setAnnotationValue(root *yaml.Node, annotationKey, newValue string) error {
 
 	if annotationsNode == nil {
 		// Create annotations mapping
-		keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: "annotations", Tag: "!!str"}
+		keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: "annotations", Tag: yamlStrTag}
 		valNode := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		metadataNode.Content = append(metadataNode.Content, keyNode, valNode)
 		annotationsNode = valNode
@@ -141,15 +143,15 @@ func setAnnotationValue(root *yaml.Node, annotationKey, newValue string) error {
 	for i := 0; i < len(annotationsNode.Content)-1; i += 2 {
 		if annotationsNode.Content[i].Value == annotationKey {
 			annotationsNode.Content[i+1].Value = newValue
-			annotationsNode.Content[i+1].Tag = "!!str"
+			annotationsNode.Content[i+1].Tag = yamlStrTag
 			annotationsNode.Content[i+1].Style = yaml.DoubleQuotedStyle
 			return nil
 		}
 	}
 
 	// Key not found, add it
-	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: annotationKey, Tag: "!!str"}
-	valNode := &yaml.Node{Kind: yaml.ScalarNode, Value: newValue, Tag: "!!str", Style: yaml.DoubleQuotedStyle}
+	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: annotationKey, Tag: yamlStrTag}
+	valNode := &yaml.Node{Kind: yaml.ScalarNode, Value: newValue, Tag: yamlStrTag, Style: yaml.DoubleQuotedStyle}
 	annotationsNode.Content = append(annotationsNode.Content, keyNode, valNode)
 
 	return nil

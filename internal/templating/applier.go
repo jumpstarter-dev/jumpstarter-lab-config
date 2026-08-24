@@ -45,7 +45,7 @@ func createMetadataParameters(obj interface{}) *Parameters {
 		val := reflect.ValueOf(obj)
 
 		// If obj is a pointer, get the element it points to
-		if val.Kind() == reflect.Ptr {
+		if val.Kind() == reflect.Pointer {
 			if val.IsNil() { // Check if the pointer is nil
 				obj = nil // Treat as nil object if pointer is nil
 			} else {
@@ -64,7 +64,7 @@ func createMetadataParameters(obj interface{}) *Parameters {
 				if metadataField.IsValid() && metadataField.CanInterface() {
 					metadataVal := metadataField
 					// Get the actual value of Metadata, handling if it's a pointer
-					if metadataVal.Kind() == reflect.Ptr {
+					if metadataVal.Kind() == reflect.Pointer {
 						if metadataVal.IsNil() {
 							return meta
 						}
@@ -90,7 +90,7 @@ func (t *TemplateApplier) applyTemplates(v reflect.Value, meta *Parameters, cust
 	}
 
 	switch v.Kind() {
-	case reflect.Ptr:
+	case reflect.Pointer:
 		if v.IsNil() {
 			return nil
 		}
