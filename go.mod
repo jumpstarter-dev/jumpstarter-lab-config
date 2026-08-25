@@ -1,6 +1,6 @@
 module github.com/jumpstarter-dev/jumpstarter-lab-config
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/charmbracelet/glamour v0.10.0

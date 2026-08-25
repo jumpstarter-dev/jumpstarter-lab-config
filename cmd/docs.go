@@ -247,7 +247,7 @@ func generateMarkdownContent(cfg *config.Config) string {
 			escapedName := escapeMarkdown(dut.Name)
 			escapedLocation := escapeMarkdown(dut.Location)
 			escapedNotes := escapeMarkdown(dut.Notes)
-			buf.WriteString(fmt.Sprintf("| %s | %s | %s |\n", escapedName, escapedLocation, escapedNotes))
+			fmt.Fprintf(&buf, "| %s | %s | %s |\n", escapedName, escapedLocation, escapedNotes)
 		}
 		buf.WriteString("\n")
 	}
