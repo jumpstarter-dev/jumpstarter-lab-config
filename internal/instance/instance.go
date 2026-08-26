@@ -170,12 +170,14 @@ func (i *Instance) checkAndPrintDiff(oldObj, newObj interface{}, objType, objNam
 	}
 
 	diff := cmp.Diff(oldObj, newObj, ignoreOpts...)
-	if dry {
-		if diff != "" {
-			fmt.Printf("📝 [%s] dry run: Would update %s %s, diff: %s\n", i.config.Name, objType, objName, diff)
+	if diff != "" {
+		if dry {
+			fmt.Printf("📝 [%s] Would update %s %s, diff: %s\n", i.config.Name, objType, objName, diff)
 		} else {
-			fmt.Printf("✅ [%s] dry run: No changes needed for %s %s\n", i.config.Name, objType, objName)
+			fmt.Printf("📝 [%s] Updating %s %s, diff: %s\n", i.config.Name, objType, objName, diff)
 		}
+	} else {
+		fmt.Printf("✅ [%s] No changes needed for %s %s\n", i.config.Name, objType, objName)
 	}
 
 	return diff != ""

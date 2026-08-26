@@ -122,7 +122,7 @@ func (i *Instance) createExporter(ctx context.Context, exporter *v1alpha1.Export
 	i.prepareMetadata(&exporter.ObjectMeta, exporter.Annotations)
 
 	if i.dryRun {
-		fmt.Printf("➕ [%s] dry run: Would create exporter %s in namespace %s\n", i.config.Name, exporter.Name, exporter.Namespace)
+		fmt.Printf("➕ [%s] Would create exporter %s in namespace %s\n", i.config.Name, exporter.Name, exporter.Namespace)
 		return nil
 	} else {
 		fmt.Printf("➕ [%s] Creating exporter %s in namespace %s\n", i.config.Name, exporter.Name, exporter.Namespace)
@@ -199,10 +199,11 @@ func (i *Instance) deleteExporter(ctx context.Context, name string) error {
 	}
 
 	if i.dryRun || i.prune {
-		fmt.Printf("🗑️ [%s] dry run / don't prune: Would delete exporter %s in namespace %s\n", i.config.Name, name, namespace)
+		fmt.Printf("🗑️ [%s] Would delete exporter %s in namespace %s (dry-run: %v, skip-prune: %v)\n", i.config.Name, name, namespace, i.dryRun, i.prune)
 		return nil
 	}
 
+	fmt.Printf("🗑️ [%s] Deleting exporter %s in namespace %s\n", i.config.Name, name, namespace)
 	return i.client.Delete(ctx, exporter)
 }
 

@@ -129,7 +129,7 @@ func (i *Instance) createClient(ctx context.Context, clientObj *v1alpha1.Client)
 	i.prepareMetadata(&clientObj.ObjectMeta, clientObj.Annotations)
 
 	if i.dryRun {
-		fmt.Printf("➕ [%s] dry run: Would create client %s in namespace %s\n", i.config.Name, clientObj.Name, clientObj.Namespace)
+		fmt.Printf("➕ [%s] Would create client %s in namespace %s\n", i.config.Name, clientObj.Name, clientObj.Namespace)
 		return nil
 	} else {
 		fmt.Printf("➕ [%s] Creating client %s in namespace %s\n", i.config.Name, clientObj.Name, clientObj.Namespace)
@@ -152,9 +152,10 @@ func (i *Instance) deleteClient(ctx context.Context, name string) error {
 	}
 
 	if i.dryRun {
-		fmt.Printf("🗑️ [%s] dry run: Would delete client %s in namespace %s\n", i.config.Name, name, namespace)
+		fmt.Printf("🗑️ [%s] Would delete client %s in namespace %s\n", i.config.Name, name, namespace)
 		return nil
 	}
 
+	fmt.Printf("🗑️ [%s] Deleting client %s in namespace %s\n", i.config.Name, name, namespace)
 	return i.client.Delete(ctx, clientObj)
 }
