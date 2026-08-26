@@ -733,8 +733,8 @@ func TestCheckAndPrintDiff(t *testing.T) {
 			},
 		}
 
-		// Test with dry=false (should not print anything)
-		t.Run("dry=false should not print", func(t *testing.T) {
+		// Test with dry=false and changes (should print updating message)
+		t.Run("dry=false with changes should print updating", func(t *testing.T) {
 			// Capture stdout
 			oldStdout := os.Stdout
 			r, w, _ := os.Pipe()
@@ -752,7 +752,35 @@ func TestCheckAndPrintDiff(t *testing.T) {
 			output := buf.String()
 
 			assert.True(t, changed, "Should detect changes")
-			assert.Empty(t, output, "Should not print anything when dry=false")
+			assert.Contains(t, output, "📝", "Should print update message with emoji")
+			assert.Contains(t, output, "Updating", "Should contain updating message")
+			assert.Contains(t, output, "exporter", "Should mention object type")
+			assert.Contains(t, output, "test-exporter", "Should mention object name")
+		})
+
+		// Test with dry=false and no changes (should print no changes message)
+		t.Run("dry=false with no changes should print no changes message", func(t *testing.T) {
+			// Capture stdout
+			oldStdout := os.Stdout
+			r, w, _ := os.Pipe()
+			os.Stdout = w
+
+			changed := inst.checkAndPrintDiff(oldObj, oldObj, "exporter", "test-exporter", false)
+
+			// Restore stdout
+			_ = w.Close()
+			os.Stdout = oldStdout
+
+			// Read captured output
+			var buf bytes.Buffer
+			_, _ = io.Copy(&buf, r)
+			output := buf.String()
+
+			assert.False(t, changed, "Should not detect changes")
+			assert.Contains(t, output, "✅", "Should print success emoji")
+			assert.Contains(t, output, "No changes needed", "Should contain no changes message")
+			assert.Contains(t, output, "exporter", "Should mention object type")
+			assert.Contains(t, output, "test-exporter", "Should mention object name")
 		})
 
 		// Test with dry=true (should print diff message)
@@ -774,8 +802,8 @@ func TestCheckAndPrintDiff(t *testing.T) {
 			output := buf.String()
 
 			assert.True(t, changed, "Should detect changes")
-			assert.Contains(t, output, "📝", "Should print dry run message with emoji")
-			assert.Contains(t, output, "dry run: Would update", "Should contain dry run message")
+			assert.Contains(t, output, "📝", "Should print update message with emoji")
+			assert.Contains(t, output, "Would update", "Should contain would update message")
 			assert.Contains(t, output, "exporter", "Should mention object type")
 			assert.Contains(t, output, "test-exporter", "Should mention object name")
 		})
@@ -800,7 +828,7 @@ func TestCheckAndPrintDiff(t *testing.T) {
 
 			assert.False(t, changed, "Should not detect changes")
 			assert.Contains(t, output, "✅", "Should print success emoji")
-			assert.Contains(t, output, "dry run: No changes needed", "Should contain no changes message")
+			assert.Contains(t, output, "No changes needed", "Should contain no changes message")
 			assert.Contains(t, output, "exporter", "Should mention object type")
 			assert.Contains(t, output, "test-exporter", "Should mention object name")
 		})
