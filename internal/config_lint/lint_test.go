@@ -1,10 +1,12 @@
 package config_lint
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	v1alphaConfig "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
@@ -282,4 +284,169 @@ func TestValidateReferences_SkipsUnmanagedExporters(t *testing.T) {
 
 	errorsByFile := validateReferences(cfg)
 	assert.Empty(t, errorsByFile)
+}
+
+func TestValidateEnabledConsistency(t *testing.T) {
+	tests := []struct {
+		name           string
+		instances      map[string]*v1alphaConfig.ExporterInstance
+		expectErrors   bool
+		expectedCount  int
+		errorSubstring string
+	}{
+		{
+			name: "labels.enabled=false with spec.enabled nil (defaults true) - should fail",
+			instances: map[string]*v1alphaConfig.ExporterInstance{
+				"test-exporter": {
+					ObjectMeta: metav1.ObjectMeta{Name: "test-exporter"},
+					Spec: v1alphaConfig.ExporterInstanceSpec{
+						// Enabled is nil, defaults to true
+						Labels: map[string]string{"enabled": "false"},
+					},
+				},
+			},
+			expectErrors:   true,
+			expectedCount:  1,
+			errorSubstring: "labels.enabled=\"false\" but spec.enabled is true",
+		},
+		{
+			name: "labels.enabled=true with spec.enabled=false - should fail",
+			instances: map[string]*v1alphaConfig.ExporterInstance{
+				"test-exporter": {
+					ObjectMeta: metav1.ObjectMeta{Name: "test-exporter"},
+					Spec: v1alphaConfig.ExporterInstanceSpec{
+						Enabled: ptr.To(false),
+						Labels:  map[string]string{"enabled": "true"},
+					},
+				},
+			},
+			expectErrors:   true,
+			expectedCount:  1,
+			errorSubstring: "labels.enabled=\"true\" but spec.enabled is false",
+		},
+		{
+			name: "labels.enabled=false with spec.enabled=false - consistent, should pass",
+			instances: map[string]*v1alphaConfig.ExporterInstance{
+				"test-exporter": {
+					ObjectMeta: metav1.ObjectMeta{Name: "test-exporter"},
+					Spec: v1alphaConfig.ExporterInstanceSpec{
+						Enabled: ptr.To(false),
+						Labels:  map[string]string{"enabled": "false"},
+					},
+				},
+			},
+			expectErrors: false,
+		},
+		{
+			name: "labels.enabled=true with spec.enabled nil (defaults true) - consistent, should pass",
+			instances: map[string]*v1alphaConfig.ExporterInstance{
+				"test-exporter": {
+					ObjectMeta: metav1.ObjectMeta{Name: "test-exporter"},
+					Spec: v1alphaConfig.ExporterInstanceSpec{
+						// Enabled is nil, defaults to true
+						Labels: map[string]string{"enabled": "true"},
+					},
+				},
+			},
+			expectErrors: false,
+		},
+		{
+			name: "labels.enabled=true with spec.enabled=true - consistent, should pass",
+			instances: map[string]*v1alphaConfig.ExporterInstance{
+				"test-exporter": {
+					ObjectMeta: metav1.ObjectMeta{Name: "test-exporter"},
+					Spec: v1alphaConfig.ExporterInstanceSpec{
+						Enabled: ptr.To(true),
+						Labels:  map[string]string{"enabled": "true"},
+					},
+				},
+			},
+			expectErrors: false,
+		},
+		{
+			name: "no labels.enabled set - should pass (no check needed)",
+			instances: map[string]*v1alphaConfig.ExporterInstance{
+				"test-exporter": {
+					ObjectMeta: metav1.ObjectMeta{Name: "test-exporter"},
+					Spec: v1alphaConfig.ExporterInstanceSpec{
+						Labels: map[string]string{"app": "test"},
+					},
+				},
+			},
+			expectErrors: false,
+		},
+		{
+			name: "no labels at all - should pass",
+			instances: map[string]*v1alphaConfig.ExporterInstance{
+				"test-exporter": {
+					ObjectMeta: metav1.ObjectMeta{Name: "test-exporter"},
+					Spec:       v1alphaConfig.ExporterInstanceSpec{},
+				},
+			},
+			expectErrors: false,
+		},
+		{
+			name: "unmanaged exporter with mismatch - should be skipped",
+			instances: map[string]*v1alphaConfig.ExporterInstance{
+				"unmanaged-exporter": {
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "unmanaged-exporter",
+						Annotations: map[string]string{
+							v1alphaConfig.UnmanagedAnnotation: "2026-02-01",
+						},
+					},
+					Spec: v1alphaConfig.ExporterInstanceSpec{
+						Enabled: ptr.To(false),
+						Labels:  map[string]string{"enabled": "true"},
+					},
+				},
+			},
+			expectErrors: false,
+		},
+		{
+			name:         "nil instance in map - should be skipped",
+			instances:    map[string]*v1alphaConfig.ExporterInstance{"nil-instance": nil},
+			expectErrors: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Loaded: &config.LoadedLabConfig{
+					ExporterInstances:       tt.instances,
+					ExporterConfigTemplates: map[string]*v1alphaConfig.ExporterConfigTemplate{},
+					SourceFiles: map[string]map[string]string{
+						"ExporterInstance": {
+							"test-exporter":      "test-exporter.yaml",
+							"unmanaged-exporter": "unmanaged-exporter.yaml",
+						},
+					},
+				},
+			}
+
+			errorsByFile := validateEnabledConsistency(cfg)
+
+			if tt.expectErrors {
+				totalErrors := 0
+				for _, errs := range errorsByFile {
+					totalErrors += len(errs)
+				}
+				assert.Equal(t, tt.expectedCount, totalErrors, "Expected %d error(s)", tt.expectedCount)
+				if tt.errorSubstring != "" {
+					found := false
+					for _, errs := range errorsByFile {
+						for _, err := range errs {
+							if strings.Contains(err.Error(), tt.errorSubstring) {
+								found = true
+							}
+						}
+					}
+					assert.True(t, found, "Expected error containing %q", tt.errorSubstring)
+				}
+			} else {
+				assert.Empty(t, errorsByFile, "Expected no errors")
+			}
+		})
+	}
 }
