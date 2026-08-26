@@ -850,6 +850,7 @@ func TestGetExporterObjectForInstance(t *testing.T) {
 				},
 				Spec: v1alpha1.ExporterSpec{
 					Username: &testUsername,
+					Enabled:  ptr.To(true),
 				},
 			},
 			expectedError: false,

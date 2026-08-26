@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/utils/ptr"
 
 	v1alpha1Config "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
@@ -447,11 +448,20 @@ func GetExporterObjectForInstance(cfg *config.Config, e *v1alpha1Config.Exporter
 			ObjectMeta: *metadata,
 			Spec: v1alpha1.ExporterSpec{
 				Username: &e.Spec.Username,
-				Enabled:  e.Spec.Enabled,
+				Enabled:  enabledWithDefault(e.Spec.Enabled),
 			},
 		}, nil
 	}
 	return nil, nil
+}
+
+// enabledWithDefault returns the provided value, defaulting to true when nil.
+// This matches the kubebuilder default on ExporterSpec.Enabled.
+func enabledWithDefault(enabled *bool) *bool {
+	if enabled == nil {
+		return ptr.To(true)
+	}
+	return enabled
 }
 
 // isConflictError checks if an error is a Kubernetes conflict error

@@ -40,12 +40,10 @@ func ValidateWithError(cfg *config.Config) error {
 }
 
 func Lint(cfg *config.Config) map[string][]error {
-	// This function is a placeholder for the linting logic.
-	// Currently, it only validates cross-references between objects.
-	// The actual linting logic can be implemented here as needed.
 	referencesErrors := validateReferences(cfg)
 	templateErrors := validateTemplates(cfg)
-	return mergeErrors(referencesErrors, templateErrors)
+	enabledErrors := validateEnabledConsistency(cfg)
+	return mergeErrors(mergeErrors(referencesErrors, templateErrors), enabledErrors)
 }
 
 func mergeErrors(map1, map2 map[string][]error) map[string][]error {
@@ -182,6 +180,74 @@ func validateReferences(cfg *config.Config) map[string][]error {
 				addError(sourceFile, fmt.Sprintf("ExporterInstance %s references non-existent config template %s",
 					name, instance.Spec.ConfigTemplateRef.Name))
 			}
+		}
+	}
+
+	return errorsByFile
+}
+
+// validateEnabledConsistency checks that spec.enabled and labels.enabled are consistent
+// for each exporter instance. A mismatch (e.g. labels.enabled="false" but spec.enabled
+// is true or unset) indicates a configuration error.
+func validateEnabledConsistency(cfg *config.Config) map[string][]error {
+	errorsByFile := make(map[string][]error)
+
+	getSourceFile := func(objectName string) string {
+		if typeMap, exists := cfg.Loaded.GetSourceFiles()["ExporterInstance"]; exists {
+			if sourceFile, exists := typeMap[objectName]; exists {
+				return sourceFile
+			}
+		}
+		return "unknown"
+	}
+
+	for name, instance := range cfg.Loaded.GetExporterInstances() {
+		if instance == nil {
+			continue
+		}
+		if isUnmanaged, _ := instance.IsUnmanaged(); isUnmanaged {
+			continue
+		}
+
+		// Resolve final labels: for instances with a config template, render
+		// the merged labels (template + instance overrides); otherwise use
+		// the instance labels directly.
+		var labels map[string]string
+		if instance.HasConfigTemplate() {
+			et, err := template.NewExporterInstanceTemplater(cfg, instance)
+			if err != nil {
+				continue // template errors are reported by validateTemplates
+			}
+			labels, err = et.RenderTemplateLabels()
+			if err != nil {
+				continue // render errors are reported by validateTemplates
+			}
+		} else {
+			labels = instance.Spec.Labels
+		}
+
+		labelEnabled, hasLabel := labels["enabled"]
+		if !hasLabel {
+			continue
+		}
+
+		// Determine effective spec.enabled (nil defaults to true)
+		specEnabled := true
+		if instance.Spec.Enabled != nil {
+			specEnabled = *instance.Spec.Enabled
+		}
+
+		sourceFile := getSourceFile(name)
+
+		if labelEnabled == "false" && specEnabled {
+			errorsByFile[sourceFile] = append(errorsByFile[sourceFile],
+				fmt.Errorf("ExporterInstance %s has labels.enabled=\"false\" but spec.enabled is true (or unset, defaulting to true); these should be consistent",
+					name))
+		}
+		if labelEnabled == "true" && !specEnabled {
+			errorsByFile[sourceFile] = append(errorsByFile[sourceFile],
+				fmt.Errorf("ExporterInstance %s has labels.enabled=\"true\" but spec.enabled is false; these should be consistent",
+					name))
 		}
 	}
 
