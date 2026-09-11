@@ -931,3 +931,216 @@ func TestParameters_Merge_BothParametersNil(t *testing.T) {
 		t.Errorf("expected nil result when both parameters are nil, got %v", result)
 	}
 }
+
+// --- Integration tests: conditionals + variable substitution ---
+
+func TestProcessTemplate_ConditionalPresent_SubstitutionApplied(t *testing.T) {
+	varsMock, err := vars.NewVariables("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	params := &Parameters{
+		parameters: map[string]string{
+			"name":     "my-exporter",
+			"pdu_host": "10.0.0.1",
+			"pdu_user": "admin",
+		},
+	}
+
+	input := `name: "$( params.name )"
+$if( params.pdu_host )
+power:
+  host: "$( params.pdu_host )"
+  user: "$( params.pdu_user )"
+$endif`
+
+	expected := `name: "my-exporter"
+power:
+  host: "10.0.0.1"
+  user: "admin"`
+
+	result, err := ProcessTemplate(input, varsMock, params, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("expected:\n%s\n\ngot:\n%s", expected, result)
+	}
+}
+
+func TestProcessTemplate_ConditionalAbsent_NoSubstitutionError(t *testing.T) {
+	// When pdu_host is absent, the $if block is stripped entirely,
+	// so $( params.pdu_host ) and $( params.pdu_user ) inside
+	// the block should NOT trigger "unhandled variable" errors.
+	varsMock, err := vars.NewVariables("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	params := &Parameters{
+		parameters: map[string]string{
+			"name": "my-exporter",
+		},
+	}
+
+	input := `name: "$( params.name )"
+$if( params.pdu_host )
+power:
+  host: "$( params.pdu_host )"
+  user: "$( params.pdu_user )"
+$endif`
+
+	expected := `name: "my-exporter"`
+
+	result, err := ProcessTemplate(input, varsMock, params, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("expected:\n%s\n\ngot:\n%s", expected, result)
+	}
+}
+
+func TestProcessTemplate_ConditionalValueSwitch_WithSubstitution(t *testing.T) {
+	varsMock, err := vars.NewVariables("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	input := `driver:
+$if( params.power_type == "snmp" )
+  type: "SNMPServer"
+  host: "$( params.snmp_host )"
+$elif( params.power_type == "ipmi" )
+  type: "IPMIServer"
+  host: "$( params.ipmi_host )"
+$endif`
+
+	t.Run("snmp_branch", func(t *testing.T) {
+		params := &Parameters{
+			parameters: map[string]string{
+				"power_type": "snmp",
+				"snmp_host":  "pdu.example.com",
+			},
+		}
+		expected := `driver:
+  type: "SNMPServer"
+  host: "pdu.example.com"`
+
+		result, err := ProcessTemplate(input, varsMock, params, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result != expected {
+			t.Errorf("expected:\n%s\n\ngot:\n%s", expected, result)
+		}
+	})
+
+	t.Run("ipmi_branch", func(t *testing.T) {
+		params := &Parameters{
+			parameters: map[string]string{
+				"power_type": "ipmi",
+				"ipmi_host":  "bmc.example.com",
+			},
+		}
+		expected := `driver:
+  type: "IPMIServer"
+  host: "bmc.example.com"`
+
+		result, err := ProcessTemplate(input, varsMock, params, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result != expected {
+			t.Errorf("expected:\n%s\n\ngot:\n%s", expected, result)
+		}
+	})
+}
+
+func TestProcessTemplate_ConditionalWithVarsAndParams(t *testing.T) {
+	varsMock, err := vars.NewVariables("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = varsMock.Set("image", "quay.io/jumpstarter:latest")
+
+	params := &Parameters{
+		parameters: map[string]string{
+			"name":     "test-exporter",
+			"pdu_host": "10.0.0.5",
+		},
+	}
+
+	input := `image: "$( vars.image )"
+name: "$( params.name )"
+$if( params.pdu_host )
+power:
+  host: "$( params.pdu_host )"
+$endif`
+
+	expected := `image: "quay.io/jumpstarter:latest"
+name: "test-exporter"
+power:
+  host: "10.0.0.5"`
+
+	result, err := ProcessTemplate(input, varsMock, params, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("expected:\n%s\n\ngot:\n%s", expected, result)
+	}
+}
+
+func TestProcessTemplate_ConditionalWithMeta(t *testing.T) {
+	varsMock, err := vars.NewVariables("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	params := &Parameters{
+		parameters: map[string]string{},
+	}
+
+	meta := &Parameters{
+		parameters: map[string]string{"name": "my-device"},
+	}
+
+	input := `$if( name )
+device: "$( name )"
+$endif`
+
+	expected := `device: "my-device"`
+
+	result, err := ProcessTemplate(input, varsMock, params, meta)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("expected:\n%s\n\ngot:\n%s", expected, result)
+	}
+}
+
+func TestProcessTemplate_NoConditionals_Unchanged(t *testing.T) {
+	// Existing behavior: templates without conditionals work exactly as before.
+	varsMock, err := vars.NewVariables("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = varsMock.Set("name", "Alice")
+
+	params := &Parameters{
+		parameters: map[string]string{"place": "Wonderland"},
+	}
+
+	input := "Hello $(vars.name), welcome to $(params.place)!"
+	expected := "Hello Alice, welcome to Wonderland!"
+	result, err := ProcessTemplate(input, varsMock, params, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}

@@ -3,23 +3,46 @@ package templating
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/vars"
 )
 
 func ProcessTemplate(data string, variables *vars.Variables, parameters *Parameters, meta *Parameters) (string, error) {
-	// This function would process the template using the provided variables.
-	// For now, we will just return the template as-is for demonstration purposes.
-	// In a real implementation, you would use a templating engine like text/template or html/template.
-	if needsReplacements(data) {
-		replacements, err := constructReplacementMap(variables, parameters, meta)
+	// Fast path: if the data contains no substitution markers and no
+	// conditional directives, return it unchanged without building the
+	// replacement map (which may trigger vault decryption errors for
+	// variables that are not even referenced).
+	if !needsReplacements(data) && !needsConditionals(data) {
+		return data, nil
+	}
+
+	replacements, err := constructReplacementMap(variables, parameters, meta)
+	if err != nil {
+		return "", err
+	}
+
+	// Pre-pass: evaluate and strip conditional directives ($if/$elif/$else/$endif).
+	// This runs before variable substitution so that variables referenced only
+	// inside excluded blocks do not trigger "unhandled variable" errors.
+	if needsConditionals(data) {
+		data, err = processConditionals(data, replacements)
 		if err != nil {
 			return "", err
 		}
+	}
+
+	if needsReplacements(data) {
 		return applyReplacements(data, replacements)
 	}
 
 	return data, nil
+}
+
+// needsConditionals returns true if the data contains any conditional directives.
+func needsConditionals(data string) bool {
+	return strings.Contains(data, "$if(") || strings.Contains(data, "$elif(") ||
+		strings.Contains(data, "$else") || strings.Contains(data, "$endif")
 }
 
 func needsReplacements(data string) bool {
