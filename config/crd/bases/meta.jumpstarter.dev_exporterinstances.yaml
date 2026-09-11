@@ -61,6 +61,12 @@ spec:
                   tray:
                     type: string
                 type: object
+              enabled:
+                description: |-
+                  Enabled controls lease eligibility for the exporter (soft switch).
+                  When false, the exporter stays registered/online but gets no new leases.
+                  nil is treated as enabled by the controller.
+                type: boolean
               exporterHostRef:
                 description: ExporterHostRef defines the reference to the exporter
                   host.
