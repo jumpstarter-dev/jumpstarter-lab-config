@@ -758,6 +758,49 @@ func TestConditionals_ElifWithTrailingComment(t *testing.T) {
 	}
 }
 
+func TestConditionals_TrailingCommentWithParenthesis(t *testing.T) {
+	// A trailing comment containing ')' should not break directive parsing.
+	// Previously, LastIndex(")") would find the ')' inside the comment.
+	input := "$if( params.key ) # enable power (optional)\npower: on\n$endif"
+	replacements := map[string]string{"params.key": "yes"}
+	expected := "power: on"
+	result, err := processConditionals(input, replacements)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+
+func TestConditionals_TrailingCommentWithParenthesisAbsent(t *testing.T) {
+	// Same as above but param is absent — block should be excluded.
+	input := "$if( params.key ) # enable power (optional)\npower: on\n$endif"
+	replacements := map[string]string{}
+	expected := ""
+	result, err := processConditionals(input, replacements)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+
+func TestConditionals_TrailingCommentWithEqualityAndParenthesis(t *testing.T) {
+	// Equality check with a comment containing parentheses
+	input := "$if( params.type == \"snmp\" ) # use SNMP (default)\nsnmp\n$endif"
+	replacements := map[string]string{"params.type": "snmp"}
+	expected := "snmp"
+	result, err := processConditionals(input, replacements)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+
 // ==========================================================================
 // Fix #3: Duplicate $else detection
 // ==========================================================================

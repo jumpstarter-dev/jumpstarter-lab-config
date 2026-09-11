@@ -184,25 +184,33 @@ func classifyLine(trimmed string) (string, directiveKind) {
 }
 
 // extractDirectiveWithComment checks if a line like "$if( expr ) # comment" or
-// "$if( expr )" is a valid directive. It finds the matching closing ) for the
-// directive and verifies that anything after it is only whitespace or a # comment.
+// "$if( expr )" is a valid directive. It strips any trailing # comment first
+// (respecting quotes), then checks that the remaining text ends with ')'.
 // Returns the directive portion (up to and including ')') and true if valid.
 func extractDirectiveWithComment(trimmed string) (string, bool) {
-	// Find the last ')' in the line
-	closeIdx := strings.LastIndex(trimmed, ")")
-	if closeIdx < 0 {
+	// Strip trailing # comment (outside of quotes) before locating the
+	// closing paren. This prevents ')' inside comments from being selected.
+	code := trimmed
+	inQuotes := false
+	for i := 0; i < len(code); i++ {
+		switch code[i] {
+		case '\\':
+			i++ // skip escaped character
+		case '"':
+			inQuotes = !inQuotes
+		case '#':
+			if !inQuotes {
+				code = code[:i]
+				i = len(code) // break out of loop
+			}
+		}
+	}
+
+	code = strings.TrimSpace(code)
+	if !strings.HasSuffix(code, ")") {
 		return "", false
 	}
-
-	directive := trimmed[:closeIdx+1]
-	rest := strings.TrimSpace(trimmed[closeIdx+1:])
-
-	// After the closing ), only whitespace or a # comment is allowed
-	if rest == "" || strings.HasPrefix(rest, "#") {
-		return directive, true
-	}
-
-	return "", false
+	return code, true
 }
 
 // isKeywordWithComment checks if trimmed is "$else # comment" or "$endif # comment".
