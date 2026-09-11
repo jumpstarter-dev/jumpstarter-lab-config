@@ -8,14 +8,20 @@ import (
 )
 
 func ProcessTemplate(data string, variables *vars.Variables, parameters *Parameters, meta *Parameters) (string, error) {
-	// This function would process the template using the provided variables.
-	// For now, we will just return the template as-is for demonstration purposes.
-	// In a real implementation, you would use a templating engine like text/template or html/template.
+	replacements, err := constructReplacementMap(variables, parameters, meta)
+	if err != nil {
+		return "", err
+	}
+
+	// Pre-pass: evaluate and strip conditional directives ($if/$elif/$else/$endif).
+	// This runs before variable substitution so that variables referenced only
+	// inside excluded blocks do not trigger "unhandled variable" errors.
+	data, err = processConditionals(data, replacements)
+	if err != nil {
+		return "", err
+	}
+
 	if needsReplacements(data) {
-		replacements, err := constructReplacementMap(variables, parameters, meta)
-		if err != nil {
-			return "", err
-		}
 		return applyReplacements(data, replacements)
 	}
 
