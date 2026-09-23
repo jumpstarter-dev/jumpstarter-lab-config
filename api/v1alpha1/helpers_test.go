@@ -5,7 +5,28 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 )
+
+func TestJumpstarterInstanceSpec_SyncClientsTriState(t *testing.T) {
+	// unset → nil (sync enabled by default)
+	var spec JumpstarterInstanceSpec
+	err := yaml.Unmarshal([]byte("notes: hello"), &spec)
+	assert.NoError(t, err)
+	assert.Nil(t, spec.SyncClients)
+
+	// explicit false → skip sync
+	err = yaml.Unmarshal([]byte("sync-clients: false"), &spec)
+	assert.NoError(t, err)
+	assert.NotNil(t, spec.SyncClients)
+	assert.False(t, *spec.SyncClients)
+
+	// explicit true → sync
+	err = yaml.Unmarshal([]byte("sync-clients: true"), &spec)
+	assert.NoError(t, err)
+	assert.NotNil(t, spec.SyncClients)
+	assert.True(t, *spec.SyncClients)
+}
 
 func TestExporterInstance_HasConfigTemplate(t *testing.T) {
 	tests := []struct {

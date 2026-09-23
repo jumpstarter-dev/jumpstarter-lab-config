@@ -8,6 +8,7 @@ spec:
     - "grpc.jump1-mpp-stg.some.endpoint.com"
     - "grpc.jump1-mpp-stg.internal.endpoint.com"
   namespace: "jumpstarter-stagging"
+  # sync-clients: false # Skip client sync for this instance (e.g. when clients are autoprovisioned from OIDC)
   notes: |
     This controller is deployed on the MPP cluster close to boston.
     It's a staging deployment.

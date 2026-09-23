@@ -50,6 +50,13 @@ type JumpstarterInstanceSpec struct {
 	// This field can be used to document the purpose, configuration, or any other relevant details.
 	// +kubebuilder:validation:Optional
 	Notes string `json:"notes,omitempty"`
+
+	// SyncClients controls whether clients are synced to this instance.
+	// When set to false, client sync is skipped (e.g. when clients are
+	// autoprovisioned from OIDC and config-driven sync would delete them).
+	// Defaults to true when unset.
+	// +kubebuilder:validation:Optional
+	SyncClients *bool `json:"sync-clients,omitempty"`
 }
 
 // JumpstarterInstanceStatus defines the observed state of JumpstarterInstance.

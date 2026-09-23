@@ -68,6 +68,13 @@ spec:
                   Notes provides additional information or comments about the Jumpstarter instance.
                   This field can be used to document the purpose, configuration, or any other relevant details.
                 type: string
+              sync-clients:
+                description: |-
+                  SyncClients controls whether clients are synced to this instance.
+                  When set to false, client sync is skipped (e.g. when clients are
+                  autoprovisioned from OIDC and config-driven sync would delete them).
+                  Defaults to true when unset.
+                type: boolean
             type: object
           status:
             description: JumpstarterInstanceStatus defines the observed state of JumpstarterInstance.
