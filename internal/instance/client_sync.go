@@ -138,7 +138,8 @@ func (i *Instance) createClient(ctx context.Context, clientObj *v1alpha1.Client)
 	return i.client.Create(ctx, clientObj)
 }
 
-// deleteClient deletes a client by name
+// deleteClient deletes a client by name. Nothing is deleted unless --prune is
+// set, and a dry run only reports the deletion.
 func (i *Instance) deleteClient(ctx context.Context, name string) error {
 	clientObj := &v1alpha1.Client{}
 	namespace := i.config.Spec.Namespace
@@ -149,6 +150,11 @@ func (i *Instance) deleteClient(ctx context.Context, name string) error {
 	err := i.client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, clientObj)
 	if err != nil {
 		return fmt.Errorf("failed to get client %s: %w", name, err)
+	}
+
+	if !i.prune {
+		fmt.Printf("⚠️ [%s] Client %s in namespace %s is not in the configuration; use --prune to delete it\n", i.config.Name, name, namespace)
+		return nil
 	}
 
 	if i.dryRun {

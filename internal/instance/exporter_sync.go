@@ -183,9 +183,8 @@ func (i *Instance) getExporterCredentials(ctx context.Context, exporter *v1alpha
 	}, nil
 }
 
-// deleteExporter deletes an exporter by name
-//
-//nolint:unused
+// deleteExporter deletes an exporter by name. Nothing is deleted unless
+// --prune is set, and a dry run only reports the deletion.
 func (i *Instance) deleteExporter(ctx context.Context, name string) error {
 	exporter := &v1alpha1.Exporter{}
 	namespace := i.config.Spec.Namespace
@@ -198,8 +197,13 @@ func (i *Instance) deleteExporter(ctx context.Context, name string) error {
 		return fmt.Errorf("failed to get exporter %s: %w", name, err)
 	}
 
-	if i.dryRun || i.prune {
-		fmt.Printf("🗑️ [%s] Would delete exporter %s in namespace %s (dry-run: %v, skip-prune: %v)\n", i.config.Name, name, namespace, i.dryRun, i.prune)
+	if !i.prune {
+		fmt.Printf("⚠️ [%s] Exporter %s in namespace %s is not in the configuration; use --prune to delete it\n", i.config.Name, name, namespace)
+		return nil
+	}
+
+	if i.dryRun {
+		fmt.Printf("🗑️ [%s] Would delete exporter %s in namespace %s\n", i.config.Name, name, namespace)
 		return nil
 	}
 
