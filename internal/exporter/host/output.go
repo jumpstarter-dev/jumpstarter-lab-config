@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,14 +29,17 @@ import (
 
 // OutputBuffer collects output for a single host, allowing atomic flush to stdout.
 type OutputBuffer struct {
-	buf           bytes.Buffer
-	hostName      string
-	hasChanges    bool
-	hasErrors     bool
-	instanceCount int
-	retryItems    []RetryItem
-	startTime     time.Time
-	duration      time.Duration
+	buf              bytes.Buffer
+	hostName         string
+	hasChanges       bool
+	hasErrors        bool
+	skipped          bool
+	skipReason       string
+	skippedInstances []string
+	instanceCount    int
+	retryItems       []RetryItem
+	startTime        time.Time
+	duration         time.Duration
 }
 
 // NewOutputBuffer creates a new OutputBuffer for the given host.
@@ -72,6 +76,17 @@ func (o *OutputBuffer) MarkError() {
 	o.hasErrors = true
 }
 
+// MarkSkipped marks this host as skipped with a reason.
+func (o *OutputBuffer) MarkSkipped(reason string) {
+	o.skipped = true
+	o.skipReason = reason
+}
+
+// SetSkippedInstances records the reasons for skipped instances on this host.
+func (o *OutputBuffer) SetSkippedInstances(instances []string) {
+	o.skippedInstances = instances
+}
+
 // AddRetryItem adds a retry item to this buffer's collection.
 func (o *OutputBuffer) AddRetryItem(item RetryItem) {
 	o.retryItems = append(o.retryItems, item)
@@ -80,10 +95,12 @@ func (o *OutputBuffer) AddRetryItem(item RetryItem) {
 // SyncPrinter handles synchronized output to stdout from multiple goroutines.
 type SyncPrinter struct {
 	mu             sync.Mutex
+	out            io.Writer
 	startTime      time.Time
 	okCount        atomic.Int32
 	changedCount   atomic.Int32
 	failedCount    atomic.Int32
+	skippedCount   atomic.Int32
 	totalInstances atomic.Int32
 	retryCount     atomic.Int32
 	retrySuccess   atomic.Int32
@@ -93,8 +110,16 @@ type SyncPrinter struct {
 // NewSyncPrinter creates a new SyncPrinter.
 func NewSyncPrinter() *SyncPrinter {
 	return &SyncPrinter{
+		out:       os.Stdout,
 		startTime: time.Now(),
 	}
+}
+
+func (p *SyncPrinter) getWriter() io.Writer {
+	if p.out == nil {
+		return os.Stdout
+	}
+	return p.out
 }
 
 // AddRetryStats records retry queue statistics.
@@ -106,25 +131,40 @@ func (p *SyncPrinter) AddRetryStats(queued, succeeded int32) {
 // FlushBuffer atomically writes a host's buffered output to stdout.
 // Hosts with no changes get a compact one-line summary.
 // Hosts with changes or errors show their full buffered output.
+// Skipped hosts get a compact one-line skip summary.
 func (p *SyncPrinter) FlushBuffer(ob *OutputBuffer) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	w := p.getWriter()
 	p.totalInstances.Add(int32(ob.instanceCount))
 
 	if ob.hasErrors {
 		p.failedCount.Add(1)
 		p.failedHosts = append(p.failedHosts, ob.hostName)
 		// Print full output for hosts with errors
-		_, _ = fmt.Fprint(os.Stdout, ob.buf.String())
+		_, _ = fmt.Fprint(w, ob.buf.String())
+	} else if ob.skipped {
+		p.skippedCount.Add(1)
+		// Compact one-liner for skipped hosts
+		if ob.skipReason != "" {
+			_, _ = fmt.Fprintf(w, "  ⏸️  %s (%d instances, skipped: %s)\n", ob.hostName, ob.instanceCount, ob.skipReason)
+		} else {
+			_, _ = fmt.Fprintf(w, "  ⏸️  %s (%d instances, skipped)\n", ob.hostName, ob.instanceCount)
+		}
 	} else if ob.hasChanges {
 		p.changedCount.Add(1)
 		// Print full output for hosts with changes
-		_, _ = fmt.Fprint(os.Stdout, ob.buf.String())
+		_, _ = fmt.Fprint(w, ob.buf.String())
 	} else {
 		p.okCount.Add(1)
 		// Compact one-liner for hosts with no changes
-		_, _ = fmt.Fprintf(os.Stdout, "  ✅ %s (%d instances, no changes) [%s]\n", ob.hostName, ob.instanceCount, formatDuration(ob.duration))
+		if len(ob.skippedInstances) > 0 {
+			_, _ = fmt.Fprintf(w, "  ✅ %s (%d instances, %d skipped [%s], no changes) [%s]\n",
+				ob.hostName, ob.instanceCount, len(ob.skippedInstances), strings.Join(ob.skippedInstances, ", "), formatDuration(ob.duration))
+		} else {
+			_, _ = fmt.Fprintf(w, "  ✅ %s (%d instances, no changes) [%s]\n", ob.hostName, ob.instanceCount, formatDuration(ob.duration))
+		}
 	}
 }
 
@@ -133,28 +173,34 @@ func (p *SyncPrinter) PrintSummary() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	w := p.getWriter()
 	elapsed := time.Since(p.startTime)
-	totalHosts := p.okCount.Load() + p.changedCount.Load() + p.failedCount.Load()
+	totalHosts := p.okCount.Load() + p.changedCount.Load() + p.failedCount.Load() + p.skippedCount.Load()
 	if totalHosts == 0 {
 		return
 	}
 
-	_, _ = fmt.Fprintf(os.Stdout, "\n📊 Summary\n")
-	_, _ = fmt.Fprintf(os.Stdout, "  Hosts:      %d processed (%d ok, %d changed, %d failed)\n",
-		totalHosts, p.okCount.Load(), p.changedCount.Load(), p.failedCount.Load())
-	_, _ = fmt.Fprintf(os.Stdout, "  Instances:  %d total\n", p.totalInstances.Load())
+	_, _ = fmt.Fprintf(w, "\n📊 Summary\n")
+	if p.skippedCount.Load() > 0 {
+		_, _ = fmt.Fprintf(w, "  Hosts:      %d processed (%d ok, %d changed, %d failed, %d skipped)\n",
+			totalHosts, p.okCount.Load(), p.changedCount.Load(), p.failedCount.Load(), p.skippedCount.Load())
+	} else {
+		_, _ = fmt.Fprintf(w, "  Hosts:      %d processed (%d ok, %d changed, %d failed)\n",
+			totalHosts, p.okCount.Load(), p.changedCount.Load(), p.failedCount.Load())
+	}
+	_, _ = fmt.Fprintf(w, "  Instances:  %d total\n", p.totalInstances.Load())
 
 	if p.retryCount.Load() > 0 {
-		_, _ = fmt.Fprintf(os.Stdout, "  Retries:    %d queued, %d succeeded, %d gave up\n",
+		_, _ = fmt.Fprintf(w, "  Retries:    %d queued, %d succeeded, %d gave up\n",
 			p.retryCount.Load(), p.retrySuccess.Load(), p.retryCount.Load()-p.retrySuccess.Load())
 	}
 
-	_, _ = fmt.Fprintf(os.Stdout, "  Runtime:    %s\n", formatDuration(elapsed))
+	_, _ = fmt.Fprintf(w, "  Runtime:    %s\n", formatDuration(elapsed))
 
 	if len(p.failedHosts) > 0 {
-		_, _ = fmt.Fprintf(os.Stdout, "  Failed hosts:\n")
+		_, _ = fmt.Fprintf(w, "  Failed hosts:\n")
 		for _, host := range p.failedHosts {
-			_, _ = fmt.Fprintf(os.Stdout, "    ❌ %s\n", host)
+			_, _ = fmt.Fprintf(w, "    ❌ %s\n", host)
 		}
 	}
 }
