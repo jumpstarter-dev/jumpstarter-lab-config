@@ -60,6 +60,9 @@ type SSHHostManager struct {
 	sftpClient   *sftp.Client
 	mutex        *sync.Mutex
 	writer       io.Writer
+	// test seams: when set, they override the real implementations
+	runCommandFn    func(command string) (*CommandResult, error)
+	reconcileFileFn func(path, content string, dryRun bool) (bool, error)
 }
 
 func NewSSHHostManager(exporterHost *v1alpha1.ExporterHost) (HostManager, error) {
@@ -103,6 +106,9 @@ func (m *SSHHostManager) Status() (string, error) {
 
 // runCommand executes a command on the remote host and returns the result
 func (m *SSHHostManager) runCommand(command string) (*CommandResult, error) {
+	if m.runCommandFn != nil {
+		return m.runCommandFn(command)
+	}
 	if m.sshClient == nil {
 		return nil, fmt.Errorf("sshClient is not initialized")
 	}
@@ -190,33 +196,33 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 		return fmt.Errorf("both SystemdContainerTemplate and SystemdServiceTemplate specified - only one should be used")
 	}
 
-	// Helper function to restart service, gracefully wating on lease exit
-	restartGracefully := func(serviceName string, dryRun bool) {
-		if !dryRun {
-			_, enableErr := m.runCommand(fmt.Sprintf("command -v podman >/dev/null 2>&1 && podman kill -s SIGHUP %q || systemctl kill -s SIGHUP %q", serviceName, serviceName))
-			if enableErr != nil {
-				_, _ = fmt.Fprintf(m.writer, "        ❌ Failed to signal %s: %v\n", serviceName, enableErr)
-			} else {
-				_, _ = fmt.Fprintf(m.writer, "        ✅ %s signalled to restart when not leased\n", serviceName)
-			}
-		} else {
-			_, _ = fmt.Fprintf(m.writer, "        📄 Would trigger restart of %s\n", serviceName)
-		}
-	}
-
 	svcName := exporterConfig.Spec.ExporterMetadata.Name
 	containerSystemdFile := "/etc/containers/systemd/" + svcName + ".container"
 	serviceSystemdFile := "/etc/systemd/system/" + svcName + ".service"
 	exporterConfigFile := "/etc/jumpstarter/exporters/" + svcName + ".yaml"
 
-	changedContainer, err := m.reconcileFile(containerSystemdFile, exporterConfig.Spec.SystemdContainerTemplate, dryRun)
-	if err != nil {
-		return fmt.Errorf("failed to reconcile container systemd file: %w", err)
-	}
+	bootcUpdating := m.GetBootcStatus() == BOOTC_UPDATING
 
-	changedService, err := m.reconcileFile(serviceSystemdFile, exporterConfig.Spec.SystemdServiceTemplate, dryRun)
-	if err != nil {
-		return fmt.Errorf("failed to reconcile service systemd file: %w", err)
+	// Unit files are deferred during a bootc upgrade: a file written without a
+	// daemon-reload is never reloaded later (the next run sees no change), so
+	// the write and the reload must land in the same run.
+	var changedContainer, changedService bool
+	if bootcUpdating {
+		if dryRun {
+			_, _ = fmt.Fprintf(m.writer, "        📄 Bootc upgrade in progress, would defer exporter systemd unit updates\n")
+		} else {
+			_, _ = fmt.Fprintf(m.writer, "        ⚠️ Bootc upgrade in progress, deferring exporter systemd unit updates (applied on next run)\n")
+		}
+	} else {
+		var err error
+		changedContainer, err = m.reconcileFile(containerSystemdFile, exporterConfig.Spec.SystemdContainerTemplate, dryRun)
+		if err != nil {
+			return fmt.Errorf("failed to reconcile container systemd file: %w", err)
+		}
+		changedService, err = m.reconcileFile(serviceSystemdFile, exporterConfig.Spec.SystemdServiceTemplate, dryRun)
+		if err != nil {
+			return fmt.Errorf("failed to reconcile service systemd file: %w", err)
+		}
 	}
 
 	changedExporterConfig, err := m.reconcileFile(exporterConfigFile, exporterConfig.Spec.ConfigTemplate, dryRun)
@@ -224,73 +230,97 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 		return fmt.Errorf("failed to reconcile exporter config file: %w", err)
 	}
 
-	if m.GetBootcStatus() == BOOTC_UPDATING {
-		if dryRun {
-			_, _ = fmt.Fprintf(m.writer, "        📄 Bootc upgrade in progress, would skip exporter service restarts/container updates\n")
-		} else {
-			_, _ = fmt.Fprintf(m.writer, "        ⚠️ Bootc upgrade in progress, skipping exporter service restarts/container updates\n")
-			return nil
-		}
+	if bootcUpdating {
+		return nil
 	}
 
 	// Only if bootc is not updating, we restart/start services and pull containers
 	// otherwise it's too much pressure on the system
 
 	if changedExporterConfig || changedContainer || changedService {
+		return m.startOrRestartService(svcName, changedContainer, changedService, dryRun)
+	}
+
+	// No file changed: check if service is running and start if needed
+	statusResult, err := m.runCommand("systemctl is-active " + fmt.Sprintf("%q", svcName))
+	serviceRunning := err == nil && strings.TrimSpace(statusResult.Stdout) == systemdStateActive
+
+	if !serviceRunning {
+		_, _ = fmt.Fprintf(m.writer, "        ⚠️ Service %s is not running...\n", svcName)
 		if !dryRun {
+			_, enableErr := m.runCommand("systemctl restart " + fmt.Sprintf("%q", svcName))
+			if enableErr != nil {
+				_, _ = fmt.Fprintf(m.writer, "        ❌ Failed to restart service %s: %v\n", svcName, enableErr)
+			} else {
+				_, _ = fmt.Fprintf(m.writer, "        ✅ Service %s restarted\n", svcName)
+			}
+		} else {
+			_, _ = fmt.Fprintf(m.writer, "        📄 Would restart service %s\n", svcName)
+		}
+	} else {
+		// Only check container version if service is running
+		err = m.checkContainerVersion(exporterConfig, svcName, dryRun, m.restartGracefully)
+		if err != nil {
+			return fmt.Errorf("container version check failed: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// restartGracefully signals the service to restart, gracefully waiting on lease exit
+func (m *SSHHostManager) restartGracefully(serviceName string, dryRun bool) {
+	if !dryRun {
+		_, enableErr := m.runCommand(fmt.Sprintf("command -v podman >/dev/null 2>&1 && podman kill -s SIGHUP %q || systemctl kill -s SIGHUP %q", serviceName, serviceName))
+		if enableErr != nil {
+			_, _ = fmt.Fprintf(m.writer, "        ❌ Failed to signal %s: %v\n", serviceName, enableErr)
+		} else {
+			_, _ = fmt.Fprintf(m.writer, "        ✅ %s signalled to restart when not leased\n", serviceName)
+		}
+	} else {
+		_, _ = fmt.Fprintf(m.writer, "        📄 Would trigger restart of %s\n", serviceName)
+	}
+}
+
+// startOrRestartService applies the systemd changes: daemon-reload (only when a
+// unit file changed), enable, and start or graceful restart of the service.
+func (m *SSHHostManager) startOrRestartService(svcName string, changedContainer, changedService bool, dryRun bool) error {
+	if !dryRun {
+		// daemon-reload is only needed when a systemd unit file changed,
+		// not when only the exporter config yaml changed
+		if changedContainer || changedService {
 			_, err := m.runCommand("systemctl daemon-reload")
 			if err != nil {
 				return fmt.Errorf("failed to reload systemd: %w", err)
 			}
-			if changedService {
-				_, err = m.runCommand("systemctl enable " + fmt.Sprintf("%q", svcName))
-				if err != nil {
-					return fmt.Errorf("failed to enable exporter: %w", err)
-				}
+		}
+		if changedService {
+			_, err := m.runCommand("systemctl enable " + fmt.Sprintf("%q", svcName))
+			if err != nil {
+				return fmt.Errorf("failed to enable exporter: %w", err)
 			}
+		}
 
-			statusResult, _ := m.runCommand("systemctl is-active " + fmt.Sprintf("%q", svcName))
-			serviceRunning := statusResult != nil && statusResult.ExitCode == 0 && strings.TrimSpace(statusResult.Stdout) == systemdStateActive
+		statusResult, _ := m.runCommand("systemctl is-active " + fmt.Sprintf("%q", svcName))
+		serviceRunning := statusResult != nil && statusResult.ExitCode == 0 && strings.TrimSpace(statusResult.Stdout) == systemdStateActive
 
-			if serviceRunning {
-				restartGracefully(svcName, dryRun)
-			} else {
-				_, startErr := m.runCommand("systemctl start " + fmt.Sprintf("%q", svcName))
-				if startErr != nil {
-					_, _ = fmt.Fprintf(m.writer, "        ❌ Failed to start service %s: %v\n", svcName, startErr)
-				} else {
-					_, _ = fmt.Fprintf(m.writer, "        ✅ Service %s started\n", svcName)
-				}
-			}
+		if serviceRunning {
+			m.restartGracefully(svcName, dryRun)
 		} else {
-			_, _ = fmt.Fprintf(m.writer, "        📄 Would reload systemd and start/restart %s\n", svcName)
+			_, startErr := m.runCommand("systemctl start " + fmt.Sprintf("%q", svcName))
+			if startErr != nil {
+				_, _ = fmt.Fprintf(m.writer, "        ❌ Failed to start service %s: %v\n", svcName, startErr)
+			} else {
+				_, _ = fmt.Fprintf(m.writer, "        ✅ Service %s started\n", svcName)
+			}
 		}
 	} else {
-		// Check if service is running and start if needed
-		statusResult, err := m.runCommand("systemctl is-active " + fmt.Sprintf("%q", svcName))
-		serviceRunning := err == nil && strings.TrimSpace(statusResult.Stdout) == systemdStateActive
-
-		if !serviceRunning {
-			_, _ = fmt.Fprintf(m.writer, "        ⚠️ Service %s is not running...\n", svcName)
-			if !dryRun {
-				_, enableErr := m.runCommand("systemctl restart " + fmt.Sprintf("%q", svcName))
-				if enableErr != nil {
-					_, _ = fmt.Fprintf(m.writer, "        ❌ Failed to restart service %s: %v\n", svcName, enableErr)
-				} else {
-					_, _ = fmt.Fprintf(m.writer, "        ✅ Service %s restarted\n", svcName)
-				}
-			} else {
-				_, _ = fmt.Fprintf(m.writer, "        📄 Would restart service %s\n", svcName)
-			}
+		if changedContainer || changedService {
+			_, _ = fmt.Fprintf(m.writer, "        📄 Would reload systemd and start/restart %s\n", svcName)
 		} else {
-			// Only check container version if service is running
-			err = m.checkContainerVersion(exporterConfig, svcName, dryRun, restartGracefully)
-			if err != nil {
-				return fmt.Errorf("container version check failed: %w", err)
-			}
+			_, _ = fmt.Fprintf(m.writer, "        📄 Would start/restart %s\n", svcName)
 		}
 	}
-
 	return nil
 }
 
@@ -433,6 +463,9 @@ func sanitizeDiff(diff string) string {
 }
 
 func (m *SSHHostManager) reconcileFile(path string, content string, dryRun bool) (bool, error) {
+	if m.reconcileFileFn != nil {
+		return m.reconcileFileFn(path, content, dryRun)
+	}
 	// Check if file exists and read its content
 	file, err := m.sftpClient.Open(path)
 	if err != nil {
