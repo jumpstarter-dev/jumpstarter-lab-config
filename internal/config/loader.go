@@ -1,7 +1,10 @@
 package config
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 )
 
@@ -97,42 +101,28 @@ func init() {
 	codecFactory = serializer.NewCodecFactory(scheme, serializer.EnableStrict)
 }
 
-// splitYAMLDocuments splits YAML content by proper document separators (--- at start of line)
-func splitYAMLDocuments(content string) []string {
-	lines := strings.Split(content, "\n")
+// splitYAMLDocuments splits YAML content into individual documents.
+//
+// It delegates to apimachinery's YAMLReader, which only treats `---` that
+// appears at the very beginning of a line as a document separator. A hand-rolled
+// splitter that trims each line first will mistake an indented `---` (for
+// example a markdown horizontal rule inside a `notes: |` block scalar, or a
+// `-----BEGIN` PEM header) for a separator and corrupt the document.
+func splitYAMLDocuments(content string) ([]string, error) {
+	reader := utilyaml.NewYAMLReader(bufio.NewReader(strings.NewReader(content)))
 	var documents []string
-	var currentDoc strings.Builder
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		// Check if this line is a document separator (starts with ---)
-		if strings.HasPrefix(trimmed, "---") {
-			// Save current document if it has content
-			if currentDoc.Len() > 0 {
-				documents = append(documents, currentDoc.String())
-				currentDoc.Reset()
-			}
-			continue // Skip the separator line itself
+	for {
+		doc, err := reader.Read()
+		if errors.Is(err, io.EOF) {
+			break
 		}
-
-		// Add line to current document
-		if currentDoc.Len() > 0 {
-			currentDoc.WriteString("\n")
+		if err != nil {
+			return nil, err
 		}
-		currentDoc.WriteString(line)
+		documents = append(documents, string(doc))
 	}
 
-	// Add the last document if it has content
-	if currentDoc.Len() > 0 {
-		documents = append(documents, currentDoc.String())
-	}
-
-	// If no documents were found (no --- separators), return the entire content as one document
-	if len(documents) == 0 {
-		return []string{content}
-	}
-
-	return documents
+	return documents, nil
 }
 
 // readAndDecodeYAMLFile reads a YAML file and decodes it into runtime.Objects.
@@ -143,32 +133,27 @@ func readAndDecodeYAMLFile(filePath string) ([]runtime.Object, error) {
 		return nil, fmt.Errorf("error reading YAML file %s: %w", filePath, err)
 	}
 
-	// Split the file content by --- to handle multi-document YAML
-	// Only split on --- that appear at the beginning of a line (proper YAML document separators)
+	// Split the file content into individual YAML documents, only splitting on
+	// `---` separators that appear at the start of a line (proper YAML document
+	// separators) so that `---` inside block scalars is left untouched.
 	content := string(yamlFile)
-	documents := splitYAMLDocuments(content)
+	documents, err := splitYAMLDocuments(content)
+	if err != nil {
+		return nil, fmt.Errorf("error splitting YAML documents in file %s: %w", filePath, err)
+	}
 
 	// Pre-allocate slice with estimated capacity
 	objects := make([]runtime.Object, 0, len(documents))
 	decode := codecFactory.UniversalDeserializer().Decode
 
 	for i, doc := range documents {
-		// For single-document files, preserve original content exactly (no trimming)
-		// For multi-document files, trim each document
-		var docContent string
-		if len(documents) == 1 {
-			// Single document - use original content to preserve exact formatting
-			docContent = doc
-		} else {
-			// Multi-document - trim whitespace from each document
-			trimmed := strings.TrimSpace(doc)
-			if trimmed == "" {
-				continue
-			}
-			docContent = trimmed
+		// Skip documents that are empty or contain only whitespace/comments
+		// (e.g. leading/trailing separators or blank sections).
+		if strings.TrimSpace(doc) == "" {
+			continue
 		}
 
-		obj, gvk, err := decode([]byte(docContent), nil, nil)
+		obj, gvk, err := decode([]byte(doc), nil, nil)
 		if err != nil {
 			return nil, fmt.Errorf("error decoding YAML document %d from file %s (GVK: %v): %w", i, filePath, gvk, err)
 		}

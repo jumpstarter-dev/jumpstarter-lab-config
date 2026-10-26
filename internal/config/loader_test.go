@@ -17,10 +17,14 @@ limitations under the License.
 package config
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 )
 
 const (
@@ -35,6 +39,11 @@ metadata:
   name: config2`
 )
 
+// splitYAMLDocuments delegates to apimachinery's YAMLReader, which only treats
+// `---` at the very start of a line as a document separator. The reader also
+// normalizes line endings and appends a trailing newline to each returned
+// document, so content assertions trim that cosmetic whitespace.
+
 func TestSplitYAMLDocuments_SingleDocument(t *testing.T) {
 	content := `apiVersion: v1
 kind: ConfigMap
@@ -43,10 +52,10 @@ metadata:
 data:
   key: value`
 
-	documents := splitYAMLDocuments(content)
-
-	require.Len(t, documents, 1)
-	assert.Equal(t, content, documents[0])
+	docs, err := splitYAMLDocuments(content)
+	require.NoError(t, err)
+	require.Len(t, docs, 1)
+	assert.Equal(t, content, strings.TrimRight(docs[0], "\n"))
 }
 
 func TestSplitYAMLDocuments_SingleDocumentWithTrailingNewline(t *testing.T) {
@@ -58,179 +67,89 @@ data:
   key: value
 `
 
-	documents := splitYAMLDocuments(content)
-
-	require.Len(t, documents, 1)
-	assert.Equal(t, content, documents[0])
+	docs, err := splitYAMLDocuments(content)
+	require.NoError(t, err)
+	require.Len(t, docs, 1)
+	assert.Equal(t, strings.TrimSpace(content), strings.TrimSpace(docs[0]))
 }
 
 func TestSplitYAMLDocuments_MultipleDocuments(t *testing.T) {
-	content := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config1
-data:
-  key1: value1
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config2
-data:
-  key2: value2`
+	content := testConfigMap1 + "\n---\n" + testConfigMap2
 
-	documents := splitYAMLDocuments(content)
-
-	require.Len(t, documents, 2)
-
-	expected1 := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config1
-data:
-  key1: value1`
-
-	expected2 := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config2
-data:
-  key2: value2`
-
-	assert.Equal(t, expected1, documents[0])
-	assert.Equal(t, expected2, documents[1])
+	docs, err := splitYAMLDocuments(content)
+	require.NoError(t, err)
+	require.Len(t, docs, 2)
+	assert.Equal(t, testConfigMap1, strings.TrimSpace(docs[0]))
+	assert.Equal(t, testConfigMap2, strings.TrimSpace(docs[1]))
 }
 
-func TestSplitYAMLDocuments_MultipleDocumentsWithTrailingNewlines(t *testing.T) {
-	content := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config1
-data:
-  key1: value1
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config2
-data:
-  key2: value2
-`
-
-	documents := splitYAMLDocuments(content)
-
-	require.Len(t, documents, 2)
-
-	expected1 := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config1
-data:
-  key1: value1`
-
-	expected2 := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config2
-data:
-  key2: value2
-`
-
-	assert.Equal(t, expected1, documents[0])
-	assert.Equal(t, expected2, documents[1])
+func TestSplitYAMLDocuments_EmptyContent(t *testing.T) {
+	docs, err := splitYAMLDocuments("")
+	require.NoError(t, err)
+	assert.Empty(t, docs)
 }
 
-func TestSplitYAMLDocuments_EmptyDocument(t *testing.T) {
-	content := ""
+func TestSplitYAMLDocuments_SeparatorWithTrailingSpaces(t *testing.T) {
+	content := testConfigMap1 + "\n---   \n" + testConfigMap2
 
-	documents := splitYAMLDocuments(content)
-
-	require.Len(t, documents, 1)
-	assert.Equal(t, "", documents[0])
-}
-
-func TestSplitYAMLDocuments_OnlySeparators(t *testing.T) {
-	content := `---
----
----`
-
-	documents := splitYAMLDocuments(content)
-
-	// Should return the entire content as one document since no --- separators create meaningful splits
-	require.Len(t, documents, 1)
-	assert.Equal(t, content, documents[0])
-}
-
-func TestSplitYAMLDocuments_SeparatorWithSpaces(t *testing.T) {
-	content := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config1
----   
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config2`
-
-	documents := splitYAMLDocuments(content)
-
-	require.Len(t, documents, 2)
-
-	expected1 := testConfigMap1
-
-	expected2 := testConfigMap2
-
-	assert.Equal(t, expected1, documents[0])
-	assert.Equal(t, expected2, documents[1])
+	docs, err := splitYAMLDocuments(content)
+	require.NoError(t, err)
+	require.Len(t, docs, 2)
+	assert.Equal(t, testConfigMap1, strings.TrimSpace(docs[0]))
+	assert.Equal(t, testConfigMap2, strings.TrimSpace(docs[1]))
 }
 
 func TestSplitYAMLDocuments_SeparatorWithComment(t *testing.T) {
+	content := testConfigMap1 + "\n--- # This is a comment\n" + testConfigMap2
+
+	docs, err := splitYAMLDocuments(content)
+	require.NoError(t, err)
+	require.Len(t, docs, 2)
+	assert.Equal(t, testConfigMap1, strings.TrimSpace(docs[0]))
+	assert.Equal(t, testConfigMap2, strings.TrimSpace(docs[1]))
+}
+
+// TestSplitYAMLDocuments_IndentedSeparatorInBlockScalar is the regression test
+// for the reported bug: an indented `---` inside a `notes: |` block scalar (a
+// markdown horizontal rule) must NOT start a new document.
+func TestSplitYAMLDocuments_IndentedSeparatorInBlockScalar(t *testing.T) {
 	content := `apiVersion: v1
 kind: ConfigMap
 metadata:
   name: config1
---- # This is a comment
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config2`
+data:
+  notes: |
+    intro
+    ---
+    outro`
 
-	documents := splitYAMLDocuments(content)
-
-	require.Len(t, documents, 2)
-
-	expected1 := testConfigMap1
-
-	expected2 := testConfigMap2
-
-	assert.Equal(t, expected1, documents[0])
-	assert.Equal(t, expected2, documents[1])
+	docs, err := splitYAMLDocuments(content)
+	require.NoError(t, err)
+	require.Len(t, docs, 1, "an indented --- inside a block scalar must not split the document")
+	assert.Equal(t, content, strings.TrimRight(docs[0], "\n"))
 }
 
-func TestSplitYAMLDocuments_FourDashes(t *testing.T) {
+// TestSplitYAMLDocuments_PEMHeaderInBlockScalar guards the other reported case:
+// a `-----BEGIN` PEM line inside a block scalar must not be treated as a
+// separator.
+func TestSplitYAMLDocuments_PEMHeaderInBlockScalar(t *testing.T) {
 	content := `apiVersion: v1
 kind: ConfigMap
 metadata:
   name: config1
-----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config2`
+data:
+  cert: |
+    -----BEGIN CERTIFICATE-----
+    abcdef
+    -----END CERTIFICATE-----`
 
-	documents := splitYAMLDocuments(content)
-
-	require.Len(t, documents, 2)
-
-	expected1 := testConfigMap1
-
-	expected2 := testConfigMap2
-
-	assert.Equal(t, expected1, documents[0])
-	assert.Equal(t, expected2, documents[1])
+	docs, err := splitYAMLDocuments(content)
+	require.NoError(t, err)
+	require.Len(t, docs, 1)
+	assert.Equal(t, content, strings.TrimRight(docs[0], "\n"))
 }
 
-func TestSplitYAMLDocuments_DashesInContent(t *testing.T) {
+func TestSplitYAMLDocuments_DashesInCommentOrValue(t *testing.T) {
 	content := `apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -240,309 +159,136 @@ data:
   description: "This has --- dashes in the value"
   key: value`
 
-	documents := splitYAMLDocuments(content)
-
-	// Should NOT split on --- in comments or string values
-	require.Len(t, documents, 1)
-	assert.Equal(t, content, documents[0])
+	docs, err := splitYAMLDocuments(content)
+	require.NoError(t, err)
+	require.Len(t, docs, 1)
+	assert.Equal(t, content, strings.TrimRight(docs[0], "\n"))
 }
 
-func TestSplitYAMLDocuments_LeadingSeparator(t *testing.T) {
+func TestSplitYAMLDocuments_OneOrTwoDashesIsNotASeparator(t *testing.T) {
+	for _, sep := range []string{"-", "--"} {
+		content := testConfigMap1 + "\n" + sep + "\n" + testConfigMap2
+		docs, err := splitYAMLDocuments(content)
+		require.NoError(t, err)
+		assert.Len(t, docs, 1, "%q should not be treated as a document separator", sep)
+	}
+}
+
+// TestSplitYAMLDocuments_FourDashesIsInvalid documents a deliberate behavior
+// change from the old hand-rolled splitter: `----` is not a valid YAML document
+// separator and apimachinery's reader rejects it.
+func TestSplitYAMLDocuments_FourDashesIsInvalid(t *testing.T) {
+	content := testConfigMap1 + "\n----\n" + testConfigMap2
+
+	_, err := splitYAMLDocuments(content)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "separator")
+}
+
+// ---- readAndDecodeYAMLFile integration tests ----
+
+func writeTempYAML(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "resource.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	return path
+}
+
+// TestReadAndDecodeYAMLFile_BlockScalarWithMarkdownRule is the end-to-end
+// regression for the reported failure: a file with a markdown horizontal rule
+// inside a block scalar used to be split into two documents and fail to load.
+func TestReadAndDecodeYAMLFile_BlockScalarWithMarkdownRule(t *testing.T) {
+	content := `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: with-notes
+data:
+  notes: |
+    # Heading
+
+    some text
+    ---
+    more text after a horizontal rule
+`
+
+	objs, err := readAndDecodeYAMLFile(writeTempYAML(t, content))
+	require.NoError(t, err)
+	require.Len(t, objs, 1)
+
+	cm, ok := objs[0].(*corev1.ConfigMap)
+	require.True(t, ok, "expected a *corev1.ConfigMap, got %T", objs[0])
+	assert.Equal(t, "with-notes", cm.Name)
+	assert.Contains(t, cm.Data["notes"], "---")
+	assert.Contains(t, cm.Data["notes"], "more text after a horizontal rule")
+}
+
+func TestReadAndDecodeYAMLFile_PEMBlock(t *testing.T) {
+	content := `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: with-cert
+data:
+  tls.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA
+    -----END CERTIFICATE-----
+`
+
+	objs, err := readAndDecodeYAMLFile(writeTempYAML(t, content))
+	require.NoError(t, err)
+	require.Len(t, objs, 1)
+
+	cm, ok := objs[0].(*corev1.ConfigMap)
+	require.True(t, ok, "expected a *corev1.ConfigMap, got %T", objs[0])
+	assert.Contains(t, cm.Data["tls.crt"], "-----BEGIN CERTIFICATE-----")
+	assert.Contains(t, cm.Data["tls.crt"], "-----END CERTIFICATE-----")
+}
+
+// TestReadAndDecodeYAMLFile_MultiDocument also exercises leading, trailing and
+// blank separator sections, all of which must be handled gracefully.
+func TestReadAndDecodeYAMLFile_MultiDocument(t *testing.T) {
 	content := `---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: config1
 ---
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config2`
 
-	documents := splitYAMLDocuments(content)
-
-	require.Len(t, documents, 2)
-
-	expected1 := testConfigMap1
-
-	expected2 := testConfigMap2
-
-	assert.Equal(t, expected1, documents[0])
-	assert.Equal(t, expected2, documents[1])
-}
-
-func TestSplitYAMLDocuments_TrailingSeparator(t *testing.T) {
-	content := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config1
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: config2
----`
-
-	documents := splitYAMLDocuments(content)
-
-	require.Len(t, documents, 2)
-
-	expected1 := testConfigMap1
-
-	expected2 := testConfigMap2
-
-	assert.Equal(t, expected1, documents[0])
-	assert.Equal(t, expected2, documents[1])
-}
-
-func TestSplitYAMLDocuments_EmptyDocumentsBetweenSeparators(t *testing.T) {
-	content := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config1
 ---
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config2`
-
-	documents := splitYAMLDocuments(content)
-
-	require.Len(t, documents, 2)
-
-	expected1 := testConfigMap1
-
-	expected2 := testConfigMap2
-
-	assert.Equal(t, expected1, documents[0])
-	assert.Equal(t, expected2, documents[1])
-}
-
-func TestSplitYAMLDocuments_WhitespaceOnlyDocument(t *testing.T) {
-	content := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config1
----
-   
-   
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config2`
-
-	documents := splitYAMLDocuments(content)
-
-	// The function includes the whitespace-only section as a separate document
-	require.Len(t, documents, 3)
-
-	expected1 := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config1`
-
-	expected2 := `   
-   `
-
-	expected3 := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config2`
-
-	assert.Equal(t, expected1, documents[0])
-	assert.Equal(t, expected2, documents[1])
-	assert.Equal(t, expected3, documents[2])
-}
-
-func TestSplitYAMLDocuments_ComplexMultiDocument(t *testing.T) {
-	content := `# First document
-apiVersion: jumpstarter.dev/v1alpha1
-kind: Client
-metadata:
-  name: client1
-  namespace: default
-spec:
-  username: user1
----
-# Second document with comment
-apiVersion: jumpstarter.dev/v1alpha1
-kind: Client
-metadata:
-  name: client2
-  namespace: default
-  annotations:
-    description: "Client with --- in annotation"
-spec:
-  username: user2
-----
-# Third document with 4 dashes separator
-apiVersion: meta.jumpstarter.dev/v1alpha1
-kind: PhysicalLocation
-metadata:
-  name: location1
-spec:
-  description: "Test location"
 `
 
-	documents := splitYAMLDocuments(content)
+	objs, err := readAndDecodeYAMLFile(writeTempYAML(t, content))
+	require.NoError(t, err)
+	require.Len(t, objs, 2)
 
-	require.Len(t, documents, 3)
-
-	expected1 := `# First document
-apiVersion: jumpstarter.dev/v1alpha1
-kind: Client
-metadata:
-  name: client1
-  namespace: default
-spec:
-  username: user1`
-
-	expected2 := `# Second document with comment
-apiVersion: jumpstarter.dev/v1alpha1
-kind: Client
-metadata:
-  name: client2
-  namespace: default
-  annotations:
-    description: "Client with --- in annotation"
-spec:
-  username: user2`
-
-	expected3 := `# Third document with 4 dashes separator
-apiVersion: meta.jumpstarter.dev/v1alpha1
-kind: PhysicalLocation
-metadata:
-  name: location1
-spec:
-  description: "Test location"
-`
-
-	assert.Equal(t, expected1, documents[0])
-	assert.Equal(t, expected2, documents[1])
-	assert.Equal(t, expected3, documents[2])
+	names := make([]string, 0, len(objs))
+	for _, obj := range objs {
+		cm, ok := obj.(*corev1.ConfigMap)
+		require.True(t, ok, "expected a *corev1.ConfigMap, got %T", obj)
+		names = append(names, cm.Name)
+	}
+	assert.ElementsMatch(t, []string{"config1", "config2"}, names)
 }
 
-func TestSplitYAMLDocuments_InvalidSeparatorTwoDashes(t *testing.T) {
+func TestReadAndDecodeYAMLFile_SingleDocument(t *testing.T) {
 	content := `apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: config1
---
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config2`
+  name: solo
+data:
+  key: value`
 
-	documents := splitYAMLDocuments(content)
+	objs, err := readAndDecodeYAMLFile(writeTempYAML(t, content))
+	require.NoError(t, err)
+	require.Len(t, objs, 1)
 
-	// Should NOT split on -- (only two dashes), treat as single document
-	require.Len(t, documents, 1)
-	assert.Equal(t, content, documents[0])
-}
-
-func TestSplitYAMLDocuments_InvalidSeparatorOneDash(t *testing.T) {
-	content := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config1
--
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config2`
-
-	documents := splitYAMLDocuments(content)
-
-	// Should NOT split on - (only one dash), treat as single document
-	require.Len(t, documents, 1)
-	assert.Equal(t, content, documents[0])
-}
-
-func TestSplitYAMLDocuments_TwoConsecutiveSeparators(t *testing.T) {
-	content := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config1
----
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config2`
-
-	documents := splitYAMLDocuments(content)
-
-	// Should handle consecutive separators gracefully, skipping empty sections
-	require.Len(t, documents, 2)
-
-	expected1 := testConfigMap1
-
-	expected2 := testConfigMap2
-
-	assert.Equal(t, expected1, documents[0])
-	assert.Equal(t, expected2, documents[1])
-}
-
-func TestSplitYAMLDocuments_MultipleSeparatorsNoContent(t *testing.T) {
-	content := `---
----
----
----`
-
-	documents := splitYAMLDocuments(content)
-
-	// All separators, no actual content - should return entire content as one document
-	require.Len(t, documents, 1)
-	assert.Equal(t, content, documents[0])
-}
-
-func TestSplitYAMLDocuments_MixedValidInvalidSeparators(t *testing.T) {
-	content := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config1
---
-this line with -- should not split
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config2
--
-single dash should not split
-----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config3`
-
-	documents := splitYAMLDocuments(content)
-
-	// Should only split on proper --- and ---- separators
-	require.Len(t, documents, 3)
-
-	expected1 := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config1
---
-this line with -- should not split`
-
-	expected2 := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config2
--
-single dash should not split`
-
-	expected3 := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config3`
-
-	assert.Equal(t, expected1, documents[0])
-	assert.Equal(t, expected2, documents[1])
-	assert.Equal(t, expected3, documents[2])
+	cm, ok := objs[0].(*corev1.ConfigMap)
+	require.True(t, ok, "expected a *corev1.ConfigMap, got %T", objs[0])
+	assert.Equal(t, "solo", cm.Name)
+	assert.Equal(t, "value", cm.Data["key"])
 }
