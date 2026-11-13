@@ -2,6 +2,7 @@ package instance
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
@@ -11,6 +12,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func TestSyncPolicies(t *testing.T) {
@@ -56,7 +59,7 @@ func TestSyncPolicies(t *testing.T) {
 			newPolicy := desired.DeepCopy()
 			newPolicy.Name = "new"
 			newPolicy.Namespace = ""
-			cfg := &config.Config{Loaded: &config.LoadedLabConfig{
+			cfg := &config.Config{Sources: config.Sources{Policies: []string{"policies/*.yaml"}}, Loaded: &config.LoadedLabConfig{
 				Policies: map[string]*v1alpha1.ExporterAccessPolicy{"existing": desired, "new": newPolicy},
 			}}
 			original, originalNew := desired.DeepCopy(), newPolicy.DeepCopy()
@@ -113,11 +116,73 @@ func TestSyncPoliciesEmptyConfig(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "stale", Namespace: pruneTestNamespace},
 	}
 	inst := newPruneTestInstance(t, false, true, policy)
-	cfg := &config.Config{Loaded: &config.LoadedLabConfig{}}
+	cfg := &config.Config{Sources: config.Sources{Policies: []string{}}, Loaded: &config.LoadedLabConfig{}}
 	require.NoError(t, inst.SyncPolicies(context.Background(), cfg))
 	err := inst.client.Get(context.Background(), client.ObjectKeyFromObject(policy), &v1alpha1.ExporterAccessPolicy{})
 	require.True(t, apierrors.IsNotFound(err), "unexpected Get result: %v", err)
 
 	inst.config.Spec.Namespace = ""
 	require.ErrorContains(t, inst.SyncPolicies(context.Background(), cfg), "namespace is required")
+}
+
+func TestSyncPoliciesContinuesAfterErrors(t *testing.T) {
+	ctx := context.Background()
+	inst := newPruneTestInstance(t, false, true)
+	existing := make([]client.Object, 0, 4)
+	for _, name := range []string{"b", "old-a", "old-b", "old-c"} {
+		existing = append(existing, &v1alpha1.ExporterAccessPolicy{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: pruneTestNamespace},
+		})
+	}
+	firstErr, secondErr := errors.New("first API failure"), errors.New("second API failure")
+	failSync := true
+	var attempted []string
+	inst.client = fake.NewClientBuilder().WithScheme(inst.client.Scheme()).WithObjects(existing...).WithInterceptorFuncs(interceptor.Funcs{
+		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			attempted = append(attempted, "create "+obj.GetName())
+			if failSync && obj.GetName() == "a" {
+				return firstErr
+			}
+			return c.Create(ctx, obj, opts...)
+		},
+		Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+			attempted = append(attempted, "update "+obj.GetName())
+			if failSync && obj.GetName() == "b" {
+				return secondErr
+			}
+			return c.Update(ctx, obj, opts...)
+		},
+		Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+			attempted = append(attempted, "delete "+obj.GetName())
+			switch obj.GetName() {
+			case "old-a":
+				return firstErr
+			case "old-b":
+				return secondErr
+			}
+			return c.Delete(ctx, obj, opts...)
+		},
+	}).Build()
+	cfg := &config.Config{
+		Sources: config.Sources{Policies: []string{"policies/*.yaml"}},
+		Loaded:  &config.LoadedLabConfig{Policies: map[string]*v1alpha1.ExporterAccessPolicy{}},
+	}
+	for _, name := range []string{"c", "b", "a"} {
+		cfg.Loaded.Policies[name] = &v1alpha1.ExporterAccessPolicy{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	}
+
+	err := inst.SyncPolicies(ctx, cfg)
+	require.ErrorIs(t, err, firstErr)
+	require.ErrorIs(t, err, secondErr)
+	assert.Equal(t, []string{"create a", "update b", "create c"}, attempted, "attempt all syncs in order, but skip pruning on failure")
+	require.NoError(t, inst.client.Get(ctx, client.ObjectKey{Name: "c", Namespace: pruneTestNamespace}, &v1alpha1.ExporterAccessPolicy{}))
+
+	failSync = false
+	attempted = nil
+	err = inst.SyncPolicies(ctx, cfg)
+	require.ErrorIs(t, err, firstErr)
+	require.ErrorIs(t, err, secondErr)
+	assert.Equal(t, []string{"create a", "update b", "delete old-a", "delete old-b", "delete old-c"}, attempted)
+	err = inst.client.Get(ctx, client.ObjectKey{Name: "old-c", Namespace: pruneTestNamespace}, &v1alpha1.ExporterAccessPolicy{})
+	require.True(t, apierrors.IsNotFound(err), "later deletions must succeed despite earlier failures: %v", err)
 }

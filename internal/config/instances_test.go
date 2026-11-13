@@ -15,19 +15,24 @@ func TestResourceSyncEnabled(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
 		cfg      ResourceSyncConfig
+		global   []string
 		fallback *bool
 		want     bool
 	}{
-		{name: "default enabled", want: true},
-		{name: "inherit disabled", fallback: ptr.To(false)},
-		{name: "inherit enabled", fallback: ptr.To(true), want: true},
+		{name: "no sources skips sync"},
+		{name: "legacy true without sources skips sync", fallback: ptr.To(true)},
+		{name: "global sources enable sync", global: []string{"clients/*.yaml"}, want: true},
+		{name: "empty global sources enable sync", global: []string{}, want: true},
+		{name: "inherit disabled", global: []string{"clients/*.yaml"}, fallback: ptr.To(false)},
+		{name: "inherit enabled", global: []string{"clients/*.yaml"}, fallback: ptr.To(true), want: true},
 		{name: "sources enable sync", cfg: ResourceSyncConfig{Sources: []string{"clients/*.yaml"}}, fallback: ptr.To(false), want: true},
 		{name: "explicit false wins", cfg: ResourceSyncConfig{Enabled: ptr.To(false), Sources: []string{"clients/*.yaml"}}, fallback: ptr.To(true)},
 		{name: "explicit true wins", cfg: ResourceSyncConfig{Enabled: ptr.To(true)}, fallback: ptr.To(false), want: true},
-		{name: "empty sources inherit", cfg: ResourceSyncConfig{Sources: []string{}}, fallback: ptr.To(false)},
+		{name: "empty instance sources enable sync", cfg: ResourceSyncConfig{Sources: []string{}}, fallback: ptr.To(false), want: true},
+		{name: "explicit false overrides global sources", cfg: ResourceSyncConfig{Enabled: ptr.To(false)}, global: []string{"clients/*.yaml"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, tt.cfg.IsEnabled(tt.fallback))
+			assert.Equal(t, tt.want, tt.cfg.IsEnabled(tt.global, tt.fallback))
 		})
 	}
 }
@@ -100,8 +105,8 @@ func TestInstanceSources(t *testing.T) {
 	assert.Empty(t, loaded.GetPoliciesForInstance("empty"))
 	assert.Equal(t, loaded.Clients, loaded.GetClientsForInstance("inherited"))
 	assert.Equal(t, loaded.Policies, loaded.GetPoliciesForInstance("inherited"))
-	assert.False(t, cfg.Instances["production"].Clients.IsEnabled(nil))
-	assert.True(t, cfg.Instances["production"].Policies.IsEnabled(nil))
+	assert.False(t, cfg.Instances["production"].Clients.IsEnabled(cfg.Sources.Clients, nil))
+	assert.True(t, cfg.Instances["production"].Policies.IsEnabled(cfg.Sources.Policies, nil))
 
 	// Configurations without the new section continue to use the global sets.
 	legacy, err := LoadConfig(writeInstanceConfig(t, ""), "")

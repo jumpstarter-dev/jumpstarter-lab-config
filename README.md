@@ -196,52 +196,59 @@ therefore prunes all policies in the target namespaces. `--dry-run` reports
 creations, updates, and requested deletions without writing changes. Client and
 exporter filters do not filter policies, and `sync-clients: false` does not
 disable policy sync.
+If neither global nor instance-specific policy sources are configured, policy
+synchronization and pruning are skipped.
+Policies are processed in name order and per-policy errors are reported together.
+All creates and updates are attempted, but pruning is skipped if any of them fail
+so existing access policies remain available. Pruning attempts all stale policies.
 
 ### Per-instance clients and policies
 
-Use the top-level `instances` section in the base configuration to enable or
-disable synchronization and choose different source files for each instance:
+Use the top-level `instances` section to opt individual instances into client
+and policy synchronization. No enable/disable flags are needed:
 
 ```yaml
 sources:
-  clients:
-    - clients/common/*.yaml
-  policies:
-    - policies/common/*.yaml
   jumpstarter_instances:
     - jumpstarter-instances/*.yaml
 
 instances:
   production:
     clients:
-      enabled: false  # Clients provisioned through OIDC
+      sources:
+        - clients/common/*.yaml
     policies:
       sources:
         - policies/common/*.yaml
         - policies/production/*.yaml
   staging:
-    clients:
-      sources:
-        - clients/common/*.yaml
-        - clients/staging/*.yaml
+    # Clients are provisioned through OIDC; omit their sources to leave them alone.
     policies:
-      enabled: false
+      sources:
+        - policies/staging/*.yaml
 ```
+
+Any other loaded instance is untouched for clients and policies because this
+example has no global client or policy sources. Omitted sources skip all
+synchronization and pruning, including Kubernetes reads, unless global sources
+are inherited or synchronization is explicitly enabled.
 
 Instance keys must match a loaded `JumpstarterInstance`'s `metadata.name`; unknown
 names fail validation. Each resource type has two optional settings:
 
 * `enabled`: an explicit value takes precedence; `false` skips all synchronization
-  and pruning for that type on that instance. Otherwise, a non-empty `sources`
-  list enables synchronization. With omitted or empty sources, policies default
-  to enabled and clients inherit `spec.sync-clients` (default `true`).
+  and pruning for that type on that instance. Otherwise, an explicit `sources`
+  list (including `[]`) enables synchronization. With omitted instance sources,
+  global sources enable synchronization unless legacy `spec.sync-clients: false`
+  disables client synchronization. With no sources at either level, sync is skipped.
 * `sources`: replaces the global sources for that instance and resource type.
   Omit it to inherit global sources. Paths are relative to the base configuration
   file. Include common globs explicitly when combining common and instance-specific
   resources. Duplicate resource names within a selected set are rejected; different
   instances may use different definitions of the same name.
 
-An explicit `sources: []` selects an empty set; it does **not** disable sync.
+An explicit `sources: []` at either level selects an empty set and enables sync;
+it does **not** disable sync. This is distinct from omitting sources.
 With sync enabled, `--prune` removes resources absent from that instance's selected
 set, including resources created outside this tool. An empty set therefore prunes
 all resources of that type in the target namespace. `--dry-run` previews changes,

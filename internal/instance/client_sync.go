@@ -11,7 +11,7 @@ import (
 )
 
 func (i *Instance) SyncClients(ctx context.Context, cfg *config.Config, filter *regexp.Regexp) error {
-	if !cfg.Instances[i.config.Name].Clients.IsEnabled(i.config.Spec.SyncClients) {
+	if !cfg.Instances[i.config.Name].Clients.IsEnabled(cfg.Sources.Clients, i.config.Spec.SyncClients) {
 		fmt.Printf("\n⏸️  [%s] Client sync disabled\n", i.config.Name)
 		return nil
 	}

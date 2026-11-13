@@ -19,6 +19,7 @@ func TestDisabledInstanceSync(t *testing.T) {
 		inst := newPruneTestInstance(t, false, true)
 		inst.config.Spec.SyncClients = ptr.To(false)
 		cfg := &config.Config{
+			Sources: config.Sources{Clients: []string{"clients/*.yaml"}},
 			Instances: map[string]config.InstanceConfig{"test": {
 				Clients:  config.ResourceSyncConfig{Enabled: enabled},
 				Policies: config.ResourceSyncConfig{Enabled: ptr.To(false)},
@@ -41,13 +42,25 @@ func TestDisabledInstanceSync(t *testing.T) {
 		require.NoError(t, inst.SyncPolicies(context.Background(), cfg))
 	}
 
-	// An explicit false also overrides the default of syncing clients.
+	// An explicit false also overrides global client sources.
 	inst := newPruneTestInstance(t, false, true)
 	inst.client = nil
-	cfg := &config.Config{Instances: map[string]config.InstanceConfig{"test": {
+	cfg := &config.Config{Sources: config.Sources{Clients: []string{"clients/*.yaml"}}, Instances: map[string]config.InstanceConfig{"test": {
 		Clients: config.ResourceSyncConfig{Enabled: ptr.To(false)},
 	}}}
 	require.NoError(t, inst.SyncClients(context.Background(), cfg, nil))
+}
+
+func TestOmittedInstanceSourcesSkipSync(t *testing.T) {
+	inst := newPruneTestInstance(t, false, true)
+	inst.client = nil // Even --prune must not contact Kubernetes for an omitted instance.
+	inst.config.Spec.Namespace = ""
+	cfg := &config.Config{Instances: map[string]config.InstanceConfig{"production": {
+		Clients:  config.ResourceSyncConfig{Sources: []string{"clients/*.yaml"}},
+		Policies: config.ResourceSyncConfig{Sources: []string{"policies/*.yaml"}},
+	}}}
+	require.NoError(t, inst.SyncClients(context.Background(), cfg, nil))
+	require.NoError(t, inst.SyncPolicies(context.Background(), cfg))
 }
 
 func TestInstanceResourceSets(t *testing.T) {
@@ -56,7 +69,7 @@ func TestInstanceResourceSets(t *testing.T) {
 	globalPolicy := &v1alpha1.ExporterAccessPolicy{ObjectMeta: metav1.ObjectMeta{Name: "global", Namespace: "manifest"}}
 	selectedClient := &v1alpha1.Client{ObjectMeta: metav1.ObjectMeta{Name: "selected", Labels: map[string]string{"updated": "yes"}}}
 	selectedPolicy := &v1alpha1.ExporterAccessPolicy{ObjectMeta: metav1.ObjectMeta{Name: "selected", Labels: map[string]string{"updated": "yes"}}}
-	cfg := &config.Config{Loaded: &config.LoadedLabConfig{
+	cfg := &config.Config{Sources: config.Sources{Clients: []string{"clients/*.yaml"}, Policies: []string{"policies/*.yaml"}}, Loaded: &config.LoadedLabConfig{
 		Clients:  map[string]*v1alpha1.Client{"global": globalClient},
 		Policies: map[string]*v1alpha1.ExporterAccessPolicy{"global": globalPolicy},
 		InstanceClients: map[string]map[string]*v1alpha1.Client{
@@ -122,7 +135,9 @@ func TestInstanceClientFilter(t *testing.T) {
 	ctx := context.Background()
 	kept := &v1alpha1.Client{ObjectMeta: metav1.ObjectMeta{Name: "unmatched", Namespace: pruneTestNamespace}}
 	inst := newPruneTestInstance(t, false, true, kept)
-	cfg := &config.Config{Loaded: &config.LoadedLabConfig{
+	cfg := &config.Config{Instances: map[string]config.InstanceConfig{"test": {
+		Clients: config.ResourceSyncConfig{Sources: []string{"clients/*.yaml"}},
+	}}, Loaded: &config.LoadedLabConfig{
 		InstanceClients: map[string]map[string]*v1alpha1.Client{"test": {
 			"selected": {ObjectMeta: metav1.ObjectMeta{Name: "selected"}},
 			"excluded": {ObjectMeta: metav1.ObjectMeta{Name: "excluded"}},

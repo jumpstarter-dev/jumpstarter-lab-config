@@ -5,10 +5,6 @@
 sources:
   locations:
     - locations/*.yaml
-  clients:
-    - clients/*.yaml
-  policies:
-    - policies/*.yaml
   exporter_hosts:
     - devices/*/*/*-sidekick.yaml
   exporters:
@@ -19,26 +15,30 @@ sources:
     - jumpstarter-instances/*.yaml
 
 # Keys match JumpstarterInstance metadata.name, not filenames.
-# jump1-mpp-bos has no override and inherits the global client and policy sets.
+# Without global sources, omitted resource types are not synchronized or pruned.
 instances:
+  jump1-mpp-bos:
+    clients:
+      sources:
+        - clients/*.yaml
+    policies:
+      sources:
+        - policies/*.yaml
   jump1-mpp-stagging-bos:
     clients:
-      # Non-empty sources enable sync unless enabled is explicitly false.
-      # These sources replace the global set; paths are relative to this file.
+      # Sources enable sync; paths are relative to this file.
       sources:
         - clients/majopela.yaml
     policies:
       sources:
         - policies/devs.yaml
   jump-centos:
-    clients:
-      enabled: false # Skip client synchronization and pruning, e.g. for OIDC clients.
+    # Omitted clients are left alone, e.g. when provisioned through OIDC.
     policies:
-      enabled: true
       sources:
         - policies/ci-instances.yaml
       # To select no policies, use sources: [] instead of the list above.
-      # With sync enabled, --prune would then delete all policies in this namespace.
+      # This enables sync; --prune would delete all policies in this namespace.
 
 variables:
   - vars.yaml

@@ -41,13 +41,17 @@ type ResourceSyncConfig struct {
 	Sources []string `yaml:"sources"` // nil inherits global sources; an empty slice selects nothing.
 }
 
-// IsEnabled honors an explicit enabled setting, then enables non-empty sources,
-// otherwise using the instance's default (enabled when unset).
-func (cfg ResourceSyncConfig) IsEnabled(fallback *bool) bool {
+// IsEnabled honors an explicit enabled setting, then instance sources (even []),
+// then global sources unless the legacy instance setting disables them.
+// Without any sources, synchronization and pruning are skipped.
+func (cfg ResourceSyncConfig) IsEnabled(globalSources []string, fallback *bool) bool {
 	if cfg.Enabled != nil {
 		return *cfg.Enabled
 	}
-	return len(cfg.Sources) > 0 || fallback == nil || *fallback
+	if cfg.Sources != nil {
+		return true
+	}
+	return globalSources != nil && (fallback == nil || *fallback)
 }
 
 // LoadConfig reads a YAML file from the given filePath and unmarshals it into a Config struct.

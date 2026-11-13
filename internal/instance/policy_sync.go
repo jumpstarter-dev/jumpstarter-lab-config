@@ -2,7 +2,10 @@ package instance
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
 	"github.com/jumpstarter-dev/jumpstarter/controller/api/v1alpha1"
@@ -11,7 +14,7 @@ import (
 
 // SyncPolicies synchronizes access policies in the instance's namespace.
 func (i *Instance) SyncPolicies(ctx context.Context, cfg *config.Config) error {
-	if !cfg.Instances[i.config.Name].Policies.IsEnabled(nil) {
+	if !cfg.Instances[i.config.Name].Policies.IsEnabled(cfg.Sources.Policies, nil) {
 		fmt.Printf("\n⏸️  [%s] Policy sync disabled\n", i.config.Name)
 		return nil
 	}
@@ -32,21 +35,26 @@ func (i *Instance) SyncPolicies(ctx context.Context, cfg *config.Config) error {
 	}
 
 	configPolicies := cfg.Loaded.GetPoliciesForInstance(i.config.Name)
-	for name, policy := range configPolicies {
-		if err := i.syncPolicy(ctx, current[name], policy); err != nil {
-			return fmt.Errorf("[%s] failed to sync policy %s: %w", i.config.Name, name, err)
+	var errs []error
+	for _, name := range slices.Sorted(maps.Keys(configPolicies)) {
+		if err := i.syncPolicy(ctx, current[name], configPolicies[name]); err != nil {
+			errs = append(errs, fmt.Errorf("[%s] failed to sync policy %s: %w", i.config.Name, name, err))
 		}
 	}
+	// Keep old access policies if their replacements could not be applied.
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
 
-	for name, policy := range current {
+	for _, name := range slices.Sorted(maps.Keys(current)) {
 		if _, ok := configPolicies[name]; ok {
 			continue
 		}
-		if err := i.deletePolicy(ctx, policy); err != nil {
-			return fmt.Errorf("[%s] failed to delete policy %s: %w", i.config.Name, name, err)
+		if err := i.deletePolicy(ctx, current[name]); err != nil {
+			errs = append(errs, fmt.Errorf("[%s] failed to delete policy %s: %w", i.config.Name, name, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (i *Instance) syncPolicy(ctx context.Context, oldPolicy, policy *v1alpha1.ExporterAccessPolicy) error {
