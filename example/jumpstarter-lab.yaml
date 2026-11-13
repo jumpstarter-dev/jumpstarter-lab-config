@@ -1,6 +1,6 @@
 # This is a basic configuration for the jumpstarter-lab-config tool
 # It defines the sources for locations, clients, exporter hosts, exporters,
-# exporter templates, and jumpstarter controllers.
+# exporter templates, access policies, and jumpstarter controllers.
 
 sources:
   locations:
@@ -17,5 +17,28 @@ sources:
     - exporter-templates/*/*.yaml
   jumpstarter_instances:
     - jumpstarter-instances/*.yaml
+
+# Keys match JumpstarterInstance metadata.name, not filenames.
+# jump1-mpp-bos has no override and inherits the global client and policy sets.
+instances:
+  jump1-mpp-stagging-bos:
+    clients:
+      # Non-empty sources enable sync unless enabled is explicitly false.
+      # These sources replace the global set; paths are relative to this file.
+      sources:
+        - clients/majopela.yaml
+    policies:
+      sources:
+        - policies/devs.yaml
+  jump-centos:
+    clients:
+      enabled: false # Skip client synchronization and pruning, e.g. for OIDC clients.
+    policies:
+      enabled: true
+      sources:
+        - policies/ci-instances.yaml
+      # To select no policies, use sources: [] instead of the list above.
+      # With sync enabled, --prune would then delete all policies in this namespace.
+
 variables:
   - vars.yaml

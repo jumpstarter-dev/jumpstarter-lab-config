@@ -11,13 +11,20 @@ import (
 )
 
 func (i *Instance) SyncClients(ctx context.Context, cfg *config.Config, filter *regexp.Regexp) error {
+	if !cfg.Instances[i.config.Name].Clients.IsEnabled(i.config.Spec.SyncClients) {
+		fmt.Printf("\n⏸️  [%s] Client sync disabled\n", i.config.Name)
+		return nil
+	}
+	if i.config.Spec.Namespace == "" {
+		return fmt.Errorf("[%s] namespace is required to sync clients", i.config.Name)
+	}
 	fmt.Printf("\n🔄 [%s] Syncing clients ===========================\n\n", i.config.Name)
 	instanceClients, err := i.listClients(ctx)
 	if err != nil {
 		return fmt.Errorf("[%s] failed to list clients: %w", i.config.Name, err)
 	}
 
-	configClientMap := cfg.Loaded.Clients
+	configClientMap := cfg.Loaded.GetClientsForInstance(i.config.Name)
 
 	// Apply filter if provided
 	if filter != nil {
@@ -125,6 +132,8 @@ func (i *Instance) updateClient(ctx context.Context, oldClientObj, clientObj *v1
 
 // createClient creates a new client
 func (i *Instance) createClient(ctx context.Context, clientObj *v1alpha1.Client) error {
+	clientObj = clientObj.DeepCopy()
+	clientObj.Namespace = i.config.Spec.Namespace
 	// Prepare metadata (annotations, namespace, etc.)
 	i.prepareMetadata(&clientObj.ObjectMeta, clientObj.Annotations)
 

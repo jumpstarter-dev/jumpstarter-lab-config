@@ -111,20 +111,12 @@ var applyCmd = &cobra.Command{
 				return fmt.Errorf("error creating instance for %s: %w", inst.Name, err)
 			}
 
-			if instanceCopy.Spec.SyncClients != nil && !*instanceCopy.Spec.SyncClients {
-				clients, err := instanceClient.ListClients(context.Background())
-				if err != nil {
-					return fmt.Errorf("error listing clients for %s: %w", inst.Name, err)
-				}
-				fmt.Printf("\n⏸️  [%s] Client sync disabled, %d client(s) in cluster:\n", inst.Name, len(clients.Items))
-				for _, c := range clients.Items {
-					fmt.Printf("  - %s\n", c.Name)
-				}
-			} else {
-				err = instanceClient.SyncClients(context.Background(), cfg, clientFilter)
-				if err != nil {
-					return fmt.Errorf("error syncing clients for %s: %w", inst.Name, err)
-				}
+			if err := instanceClient.SyncClients(context.Background(), cfg, clientFilter); err != nil {
+				return fmt.Errorf("error syncing clients for %s: %w", inst.Name, err)
+			}
+
+			if err := instanceClient.SyncPolicies(context.Background(), cfg); err != nil {
+				return fmt.Errorf("error syncing policies for %s: %w", inst.Name, err)
 			}
 
 			instanceServiceParametersMap, err := instanceClient.SyncExporters(

@@ -175,6 +175,82 @@ Applying changes:
 ```
 
 
+### Synchronizing access policies
+
+Include `ExporterAccessPolicy` manifests through `sources.policies`:
+
+```yaml
+sources:
+  policies:
+    - policies/*.yaml
+```
+
+By default, `apply` creates and updates these policies in every configured Jumpstarter
+instance's `spec.namespace` (required for policy sync), overriding any namespace
+in the policy manifest. Specs and labels are synchronized; annotations are merged
+and `managed-by: jumpstarter-lab-config` is added.
+
+`apply --prune` also deletes policies absent from the configuration in those
+namespaces, including policies created outside this tool. An empty policy set
+therefore prunes all policies in the target namespaces. `--dry-run` reports
+creations, updates, and requested deletions without writing changes. Client and
+exporter filters do not filter policies, and `sync-clients: false` does not
+disable policy sync.
+
+### Per-instance clients and policies
+
+Use the top-level `instances` section in the base configuration to enable or
+disable synchronization and choose different source files for each instance:
+
+```yaml
+sources:
+  clients:
+    - clients/common/*.yaml
+  policies:
+    - policies/common/*.yaml
+  jumpstarter_instances:
+    - jumpstarter-instances/*.yaml
+
+instances:
+  production:
+    clients:
+      enabled: false  # Clients provisioned through OIDC
+    policies:
+      sources:
+        - policies/common/*.yaml
+        - policies/production/*.yaml
+  staging:
+    clients:
+      sources:
+        - clients/common/*.yaml
+        - clients/staging/*.yaml
+    policies:
+      enabled: false
+```
+
+Instance keys must match a loaded `JumpstarterInstance`'s `metadata.name`; unknown
+names fail validation. Each resource type has two optional settings:
+
+* `enabled`: an explicit value takes precedence; `false` skips all synchronization
+  and pruning for that type on that instance. Otherwise, a non-empty `sources`
+  list enables synchronization. With omitted or empty sources, policies default
+  to enabled and clients inherit `spec.sync-clients` (default `true`).
+* `sources`: replaces the global sources for that instance and resource type.
+  Omit it to inherit global sources. Paths are relative to the base configuration
+  file. Include common globs explicitly when combining common and instance-specific
+  resources. Duplicate resource names within a selected set are rejected; different
+  instances may use different definitions of the same name.
+
+An explicit `sources: []` selects an empty set; it does **not** disable sync.
+With sync enabled, `--prune` removes resources absent from that instance's selected
+set, including resources created outside this tool. An empty set therefore prunes
+all resources of that type in the target namespace. `--dry-run` previews changes,
+and `--filter-clients` still limits client synchronization and pruning.
+
+Both clients and policies are synchronized into the instance's `spec.namespace`,
+which is required when their synchronization is enabled. This overrides any
+namespace in the source manifests.
+
 ### Updating bootc images, useful to update bootc images in the exporter hosts (sidekicks)
 
 ```shell

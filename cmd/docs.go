@@ -116,11 +116,14 @@ func placeholderEncryptedVars(cfg *config.Config) (*config.Config, error) {
 	// Create a copy of the loaded config with mock variables
 	docsCfg := &config.Config{
 		Sources:   cfg.Sources,
+		Instances: cfg.Instances,
 		Variables: cfg.Variables,
 		BaseDir:   cfg.BaseDir,
 		Loaded: &config.LoadedLabConfig{
 			Clients:                 cfg.Loaded.Clients,
 			Policies:                cfg.Loaded.Policies,
+			InstanceClients:         cfg.Loaded.InstanceClients,
+			InstancePolicies:        cfg.Loaded.InstancePolicies,
 			PhysicalLocations:       cfg.Loaded.PhysicalLocations,
 			ExporterHosts:           cfg.Loaded.ExporterHosts,
 			ExporterInstances:       cfg.Loaded.ExporterInstances,
