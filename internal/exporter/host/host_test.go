@@ -1,6 +1,7 @@
 package host
 
 import (
+	"bytes"
 	"fmt"
 	"sync"
 	"testing"
@@ -316,6 +317,55 @@ func TestSyncPrinterCounters(t *testing.T) {
 		assert.Equal(t, int32(1), printer.failedCount.Load())
 	})
 
+	t.Run("FlushBuffer tracks skipped count and outputs skip line", func(t *testing.T) {
+		var buf bytes.Buffer
+		printer := NewSyncPrinter()
+		printer.out = &buf
+
+		skippedBuf := NewOutputBuffer("skipped-host", 2)
+		skippedBuf.MarkSkipped("nxp-1 dead: broken, nxp-2 unmanaged: 2026-02-10")
+		skippedBuf.Done()
+		printer.FlushBuffer(skippedBuf)
+
+		assert.Equal(t, int32(1), printer.skippedCount.Load())
+		assert.Equal(t, int32(0), printer.okCount.Load())
+		assert.Equal(t, int32(2), printer.totalInstances.Load())
+		assert.Contains(t, buf.String(), "⏸️  skipped-host (2 instances, skipped: nxp-1 dead: broken, nxp-2 unmanaged: 2026-02-10)")
+	})
+
+	t.Run("FlushBuffer mixed instances on no changes shows skipped count", func(t *testing.T) {
+		var buf bytes.Buffer
+		printer := NewSyncPrinter()
+		printer.out = &buf
+
+		mixedBuf := NewOutputBuffer("mixed-host", 2)
+		mixedBuf.SetSkippedInstances([]string{"nxp-1 dead: broken"})
+		mixedBuf.Done()
+		printer.FlushBuffer(mixedBuf)
+
+		assert.Equal(t, int32(1), printer.okCount.Load())
+		assert.Equal(t, int32(0), printer.skippedCount.Load())
+		assert.Contains(t, buf.String(), "✅ mixed-host (2 instances, 1 skipped [nxp-1 dead: broken], no changes)")
+	})
+
+	t.Run("PrintSummary includes skipped hosts", func(t *testing.T) {
+		var buf bytes.Buffer
+		printer := NewSyncPrinter()
+		printer.out = &buf
+
+		okBuf := NewOutputBuffer("ok-host", 1)
+		printer.FlushBuffer(okBuf)
+
+		skippedBuf := NewOutputBuffer("skipped-host", 1)
+		skippedBuf.MarkSkipped("dead")
+		printer.FlushBuffer(skippedBuf)
+
+		printer.PrintSummary()
+		output := buf.String()
+		assert.Contains(t, output, "Hosts:      2 processed (1 ok, 0 changed, 0 failed, 1 skipped)")
+		assert.Contains(t, output, "Instances:  2 total")
+	})
+
 	t.Run("AddRetryStats accumulates", func(t *testing.T) {
 		printer := NewSyncPrinter()
 		printer.AddRetryStats(5, 3)
@@ -474,5 +524,64 @@ func TestFilterExporterInstances_SkipsUnmanaged(t *testing.T) {
 		out := NewOutputBuffer("host-1", len(instances))
 		filtered := syncer.filterExporterInstances("host-1", instances, out)
 		assert.Nil(t, filtered)
+	})
+}
+
+func TestFilterExporterInstances_SkipsDead(t *testing.T) {
+	syncer := &ExporterHostSyncer{}
+
+	t.Run("mixed alive and dead", func(t *testing.T) {
+		instances := []*v1alpha1.ExporterInstance{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "alive",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "dead-1",
+					Annotations: map[string]string{
+						v1alpha1.DeadAnnotation: "broken hardware",
+					},
+				},
+			},
+		}
+
+		out := NewOutputBuffer("host-1", len(instances))
+		filtered := syncer.filterExporterInstances("host-1", instances, out)
+		assert.Len(t, filtered, 1)
+		assert.Equal(t, "alive", filtered[0].Name)
+		assert.False(t, out.skipped)
+		assert.Equal(t, []string{"dead-1 dead: broken hardware"}, out.skippedInstances)
+		assert.Contains(t, out.buf.String(), "Exporter instance: dead-1 skipped - dead: broken hardware")
+	})
+
+	t.Run("all dead with various annotations", func(t *testing.T) {
+		instances := []*v1alpha1.ExporterInstance{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "dead-1",
+					Annotations: map[string]string{
+						v1alpha1.DeadAnnotation: "broken",
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "dead-2",
+					Annotations: map[string]string{
+						v1alpha1.LegacyDeadAnnotation: "",
+					},
+				},
+			},
+		}
+
+		out := NewOutputBuffer("host-1", len(instances))
+		filtered := syncer.filterExporterInstances("host-1", instances, out)
+		assert.Nil(t, filtered)
+		assert.True(t, out.skipped)
+		assert.Equal(t, "dead-1 dead: broken, dead-2 dead", out.skipReason)
+		assert.Equal(t, []string{"dead-1 dead: broken", "dead-2 dead"}, out.skippedInstances)
+		assert.Contains(t, out.buf.String(), "Exporter host: host-1 skipped - all instances inactive: [dead-1 dead: broken, dead-2 dead]")
 	})
 }

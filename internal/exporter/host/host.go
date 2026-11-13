@@ -97,6 +97,13 @@ func isExporterInstanceUnmanaged(instance *api.ExporterInstance) (bool, string) 
 	return instance.IsUnmanaged()
 }
 
+func deadReason(annotation string) string {
+	if annotation == "" {
+		return "dead"
+	}
+	return fmt.Sprintf("dead: %s", annotation)
+}
+
 func unmanagedReason(annotation string) string {
 	if annotation == "" {
 		return "missing discovery date"
@@ -117,6 +124,8 @@ func (e *ExporterHostSyncer) filterExporterInstances(hostName string, exporterIn
 		exporterInstances = filteredInstances
 	}
 
+	out.instanceCount = len(exporterInstances)
+
 	// no instances match the filter
 	if len(exporterInstances) == 0 {
 		return nil
@@ -131,8 +140,9 @@ func (e *ExporterHostSyncer) filterExporterInstances(hostName string, exporterIn
 		}
 
 		if isDead, deadAnnotation := isExporterInstanceDead(exporterInstance); isDead {
-			out.Printf("    📟 Exporter instance: %s skipped - dead: %s\n", exporterInstance.Name, deadAnnotation)
-			inactiveReasons = append(inactiveReasons, fmt.Sprintf("%s dead: %s", exporterInstance.Name, deadAnnotation))
+			reason := deadReason(deadAnnotation)
+			out.Printf("    📟 Exporter instance: %s skipped - %s\n", exporterInstance.Name, reason)
+			inactiveReasons = append(inactiveReasons, fmt.Sprintf("%s %s", exporterInstance.Name, reason))
 			continue
 		}
 
@@ -146,9 +156,12 @@ func (e *ExporterHostSyncer) filterExporterInstances(hostName string, exporterIn
 		activeInstances = append(activeInstances, exporterInstance)
 	}
 
+	out.SetSkippedInstances(inactiveReasons)
+
 	// all instances are dead/unmanaged
 	if len(activeInstances) == 0 && len(inactiveReasons) > 0 {
 		out.Printf("\n💻  Exporter host: %s skipped - all instances inactive: [%s]\n", hostName, strings.Join(inactiveReasons, ", "))
+		out.MarkSkipped(strings.Join(inactiveReasons, ", "))
 		return nil
 	}
 
@@ -301,9 +314,12 @@ func (e *ExporterHostSyncer) processExporterInstancesAndBootc(exporterInstances 
 
 // hostWork represents a unit of work for processing a single host
 type hostWork struct {
-	host      *api.ExporterHost
-	hostName  string
-	instances []*api.ExporterInstance
+	host             *api.ExporterHost
+	hostName         string
+	instances        []*api.ExporterInstance
+	totalInstances   int
+	skippedInstances []string
+	skippedOutput    string
 }
 
 // processGlobalRetryQueue processes the global retry queue with exponential backoff
@@ -494,12 +510,12 @@ func (e *ExporterHostSyncer) SyncExporterHosts() error {
 
 		// Use a temporary buffer for filtering output (e.g. "all dead" messages)
 		filterOut := NewOutputBuffer(host.Name, len(exporterInstances))
-		exporterInstances = e.filterExporterInstances(host.Name, exporterInstances, filterOut)
+		filteredInstances := e.filterExporterInstances(host.Name, exporterInstances, filterOut)
 
 		// Skip the host if no viable exporter instances remain
-		if len(exporterInstances) == 0 {
+		if len(filteredInstances) == 0 {
 			// Flush any filter messages (like "all dead" skips)
-			if filterOut.buf.Len() > 0 {
+			if filterOut.skipped || filterOut.buf.Len() > 0 {
 				printer.FlushBuffer(filterOut)
 			}
 			continue
@@ -517,9 +533,12 @@ func (e *ExporterHostSyncer) SyncExporterHosts() error {
 		}
 
 		work = append(work, hostWork{
-			host:      hostCopy,
-			hostName:  host.Name,
-			instances: exporterInstances,
+			host:             hostCopy,
+			hostName:         host.Name,
+			instances:        filteredInstances,
+			totalInstances:   filterOut.instanceCount,
+			skippedInstances: filterOut.skippedInstances,
+			skippedOutput:    filterOut.buf.String(),
 		})
 	}
 
@@ -534,8 +553,12 @@ func (e *ExporterHostSyncer) SyncExporterHosts() error {
 
 	for _, w := range work {
 		g.Go(func() error {
-			out := NewOutputBuffer(w.host.Spec.Addresses[0], len(w.instances))
+			out := NewOutputBuffer(w.host.Spec.Addresses[0], w.totalInstances)
+			out.SetSkippedInstances(w.skippedInstances)
 			out.Printf("\n💻  Exporter host: %s\n", w.host.Spec.Addresses[0])
+			if w.skippedOutput != "" {
+				out.Printf("%s", w.skippedOutput)
+			}
 
 			e.processExporterInstancesAndBootc(w.instances, w.hostName, w.host, out)
 			out.Done()
