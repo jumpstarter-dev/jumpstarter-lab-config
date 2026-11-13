@@ -175,6 +175,89 @@ Applying changes:
 ```
 
 
+### Synchronizing access policies
+
+Include `ExporterAccessPolicy` manifests through `sources.policies`:
+
+```yaml
+sources:
+  policies:
+    - policies/*.yaml
+```
+
+By default, `apply` creates and updates these policies in every configured Jumpstarter
+instance's `spec.namespace` (required for policy sync), overriding any namespace
+in the policy manifest. Specs and labels are synchronized; annotations are merged
+and `managed-by: jumpstarter-lab-config` is added.
+
+`apply --prune` also deletes policies absent from the configuration in those
+namespaces, including policies created outside this tool. An empty policy set
+therefore prunes all policies in the target namespaces. `--dry-run` reports
+creations, updates, and requested deletions without writing changes. Client and
+exporter filters do not filter policies, and `sync-clients: false` does not
+disable policy sync.
+If neither global nor instance-specific policy sources are configured, policy
+synchronization and pruning are skipped.
+Policies are processed in name order and per-policy errors are reported together.
+All creates and updates are attempted, but pruning is skipped if any of them fail
+so existing access policies remain available. Pruning attempts all stale policies.
+
+### Per-instance clients and policies
+
+Use the top-level `instances` section to opt individual instances into client
+and policy synchronization. No enable/disable flags are needed:
+
+```yaml
+sources:
+  jumpstarter_instances:
+    - jumpstarter-instances/*.yaml
+
+instances:
+  production:
+    clients:
+      sources:
+        - clients/common/*.yaml
+    policies:
+      sources:
+        - policies/common/*.yaml
+        - policies/production/*.yaml
+  staging:
+    # Clients are provisioned through OIDC; omit their sources to leave them alone.
+    policies:
+      sources:
+        - policies/staging/*.yaml
+```
+
+Any other loaded instance is untouched for clients and policies because this
+example has no global client or policy sources. Omitted sources skip all
+synchronization and pruning, including Kubernetes reads, unless global sources
+are inherited or synchronization is explicitly enabled.
+
+Instance keys must match a loaded `JumpstarterInstance`'s `metadata.name`; unknown
+names fail validation. Each resource type has two optional settings:
+
+* `enabled`: an explicit value takes precedence; `false` skips all synchronization
+  and pruning for that type on that instance. Otherwise, an explicit `sources`
+  list (including `[]`) enables synchronization. With omitted instance sources,
+  global sources enable synchronization unless legacy `spec.sync-clients: false`
+  disables client synchronization. With no sources at either level, sync is skipped.
+* `sources`: replaces the global sources for that instance and resource type.
+  Omit it to inherit global sources. Paths are relative to the base configuration
+  file. Include common globs explicitly when combining common and instance-specific
+  resources. Duplicate resource names within a selected set are rejected; different
+  instances may use different definitions of the same name.
+
+An explicit `sources: []` at either level selects an empty set and enables sync;
+it does **not** disable sync. This is distinct from omitting sources.
+With sync enabled, `--prune` removes resources absent from that instance's selected
+set, including resources created outside this tool. An empty set therefore prunes
+all resources of that type in the target namespace. `--dry-run` previews changes,
+and `--filter-clients` still limits client synchronization and pruning.
+
+Both clients and policies are synchronized into the instance's `spec.namespace`,
+which is required when their synchronization is enabled. This overrides any
+namespace in the source manifests.
+
 ### Updating bootc images, useful to update bootc images in the exporter hosts (sidekicks)
 
 ```shell

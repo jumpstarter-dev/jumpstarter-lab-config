@@ -24,6 +24,8 @@ import (
 type LoadedLabConfig struct {
 	Clients                 map[string]*jsApi.Client
 	Policies                map[string]*jsApi.ExporterAccessPolicy
+	InstanceClients         map[string]map[string]*jsApi.Client
+	InstancePolicies        map[string]map[string]*jsApi.ExporterAccessPolicy
 	PhysicalLocations       map[string]*api.PhysicalLocation
 	ExporterHosts           map[string]*api.ExporterHost
 	ExporterInstances       map[string]*api.ExporterInstance
@@ -42,6 +44,20 @@ func (cfg *LoadedLabConfig) GetClients() map[string]*jsApi.Client {
 }
 
 func (cfg *LoadedLabConfig) GetPolicies() map[string]*jsApi.ExporterAccessPolicy {
+	return cfg.Policies
+}
+
+func (cfg *LoadedLabConfig) GetClientsForInstance(name string) map[string]*jsApi.Client {
+	if clients, ok := cfg.InstanceClients[name]; ok {
+		return clients
+	}
+	return cfg.Clients
+}
+
+func (cfg *LoadedLabConfig) GetPoliciesForInstance(name string) map[string]*jsApi.ExporterAccessPolicy {
+	if policies, ok := cfg.InstancePolicies[name]; ok {
+		return policies
+	}
 	return cfg.Policies
 }
 
@@ -264,6 +280,8 @@ func LoadAllResources(cfg *Config, vaultPassFile string) (*LoadedLabConfig, erro
 	loaded := &LoadedLabConfig{
 		Clients:                 make(map[string]*jsApi.Client),
 		Policies:                make(map[string]*jsApi.ExporterAccessPolicy),
+		InstanceClients:         make(map[string]map[string]*jsApi.Client),
+		InstancePolicies:        make(map[string]map[string]*jsApi.ExporterAccessPolicy),
 		PhysicalLocations:       make(map[string]*api.PhysicalLocation),
 		ExporterHosts:           make(map[string]*api.ExporterHost),
 		ExporterInstances:       make(map[string]*api.ExporterInstance),
@@ -296,6 +314,9 @@ func LoadAllResources(cfg *Config, vaultPassFile string) (*LoadedLabConfig, erro
 			return nil, fmt.Errorf("failed to load %s: %w", m.resourceTypeName, err)
 		}
 	}
+	if err := loaded.loadInstanceResources(cfg); err != nil {
+		return nil, err
+	}
 
 	for _, filePath := range cfg.Variables {
 		// calculate filepath based on the config's base directory
@@ -313,6 +334,31 @@ func LoadAllResources(cfg *Config, vaultPassFile string) (*LoadedLabConfig, erro
 	cfg.ContainerVersions = containerVersions
 
 	return loaded, nil
+}
+
+func (loaded *LoadedLabConfig) loadInstanceResources(cfg *Config) error {
+	for name, overrides := range cfg.Instances {
+		if _, ok := loaded.JumpstarterInstances[name]; !ok {
+			return fmt.Errorf("instances.%s references an unknown JumpstarterInstance", name)
+		}
+		// Duplicate names are checked within each instance's selected set, not across instances.
+		sourceFiles := make(map[string]map[string]string)
+		if overrides.Clients.Sources != nil {
+			clients := make(map[string]*jsApi.Client)
+			if err := processResourceGlobs(overrides.Clients.Sources, &clients, "Client", cfg, sourceFiles); err != nil {
+				return fmt.Errorf("instances.%s.clients: %w", name, err)
+			}
+			loaded.InstanceClients[name] = clients
+		}
+		if overrides.Policies.Sources != nil {
+			policies := make(map[string]*jsApi.ExporterAccessPolicy)
+			if err := processResourceGlobs(overrides.Policies.Sources, &policies, "ExporterAccessPolicy", cfg, sourceFiles); err != nil {
+				return fmt.Errorf("instances.%s.policies: %w", name, err)
+			}
+			loaded.InstancePolicies[name] = policies
+		}
+	}
+	return nil
 }
 
 // retrieveContainerVersionsFromExporters retrieves container versions for all unique container images found in exporters
@@ -358,6 +404,17 @@ func ReportLoading(cfg *Config) {
 	if len(cfg.Sources.Clients) > 0 {
 		for _, pattern := range cfg.Sources.Clients {
 			fmt.Printf("- %s\n", pattern)
+		}
+	}
+	for _, pattern := range cfg.Sources.Policies {
+		fmt.Printf("- %s\n", pattern)
+	}
+	for name, overrides := range cfg.Instances {
+		for _, pattern := range overrides.Clients.Sources {
+			fmt.Printf("- %s (instance %s, clients)\n", pattern, name)
+		}
+		for _, pattern := range overrides.Policies.Sources {
+			fmt.Printf("- %s (instance %s, policies)\n", pattern, name)
 		}
 	}
 	if len(cfg.Sources.ExporterHosts) > 0 {
