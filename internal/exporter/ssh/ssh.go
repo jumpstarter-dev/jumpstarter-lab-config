@@ -15,6 +15,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/container"
+	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/exporter/template"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -63,6 +64,9 @@ type SSHHostManager struct {
 }
 
 func NewSSHHostManager(exporterHost *v1alpha1.ExporterHost) (HostManager, error) {
+	if exporterHost.Spec.Management.SSH == nil {
+		return nil, fmt.Errorf("ExporterHost %q has no management.ssh", exporterHost.Name)
+	}
 
 	sshHm := &SSHHostManager{
 		ExporterHost: exporterHost,
@@ -185,9 +189,9 @@ func (m *SSHHostManager) Diff() (string, error) {
 }
 
 func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, dryRun bool) error {
-	// Validate mutual exclusivity: both templates cannot be specified simultaneously
-	if exporterConfig.Spec.SystemdContainerTemplate != "" && exporterConfig.Spec.SystemdServiceTemplate != "" {
-		return fmt.Errorf("both SystemdContainerTemplate and SystemdServiceTemplate specified - only one should be used")
+	files, err := template.HostFiles(exporterConfig)
+	if err != nil {
+		return err
 	}
 
 	// Helper function to restart service, gracefully wating on lease exit
@@ -204,22 +208,19 @@ func (m *SSHHostManager) Apply(exporterConfig *v1alpha1.ExporterConfigTemplate, 
 		}
 	}
 
-	svcName := exporterConfig.Spec.ExporterMetadata.Name
-	containerSystemdFile := "/etc/containers/systemd/" + svcName + ".container"
-	serviceSystemdFile := "/etc/systemd/system/" + svcName + ".service"
-	exporterConfigFile := "/etc/jumpstarter/exporters/" + svcName + ".yaml"
+	svcName := files.ExporterName
 
-	changedContainer, err := m.reconcileFile(containerSystemdFile, exporterConfig.Spec.SystemdContainerTemplate, dryRun)
+	changedContainer, err := m.reconcileFile(files.ContainerUnit.Path, files.ContainerUnit.Content, dryRun)
 	if err != nil {
 		return fmt.Errorf("failed to reconcile container systemd file: %w", err)
 	}
 
-	changedService, err := m.reconcileFile(serviceSystemdFile, exporterConfig.Spec.SystemdServiceTemplate, dryRun)
+	changedService, err := m.reconcileFile(files.ServiceUnit.Path, files.ServiceUnit.Content, dryRun)
 	if err != nil {
 		return fmt.Errorf("failed to reconcile service systemd file: %w", err)
 	}
 
-	changedExporterConfig, err := m.reconcileFile(exporterConfigFile, exporterConfig.Spec.ConfigTemplate, dryRun)
+	changedExporterConfig, err := m.reconcileFile(files.Config.Path, files.Config.Content, dryRun)
 	if err != nil {
 		return fmt.Errorf("failed to reconcile exporter config file: %w", err)
 	}
@@ -432,6 +433,13 @@ func sanitizeDiff(diff string) string {
 	return result
 }
 
+// ContentDiff returns the diff between two versions of a file, with sensitive values redacted.
+// It redacts before diffing: cmp.Diff can split a long line into pieces that the patterns no
+// longer match. The diff is empty when only redacted values differ.
+func ContentDiff(existing, desired string) string {
+	return cmp.Diff(sanitizeDiff(existing), sanitizeDiff(desired))
+}
+
 func (m *SSHHostManager) reconcileFile(path string, content string, dryRun bool) (bool, error) {
 	// Check if file exists and read its content
 	file, err := m.sftpClient.Open(path)
@@ -504,11 +512,9 @@ func (m *SSHHostManager) reconcileFile(path string, content string, dryRun bool)
 	}
 
 	// Content doesn't match, show diff and update the file
-	diff := cmp.Diff(string(existingContent), content)
-	if diff != "" {
-		sanitizedDiff := sanitizeDiff(diff)
-		_, _ = fmt.Fprintf(m.writer, "            📄 Changes for file: %s\n", path)
-		_, _ = fmt.Fprintf(m.writer, "            Diff (-existing +new):\n%s\n", sanitizedDiff)
+	_, _ = fmt.Fprintf(m.writer, "            📄 Changes for file: %s\n", path)
+	if diff := ContentDiff(string(existingContent), content); diff != "" {
+		_, _ = fmt.Fprintf(m.writer, "            Diff (-existing +new):\n%s\n", diff)
 	}
 
 	if dryRun {

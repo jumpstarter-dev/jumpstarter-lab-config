@@ -55,7 +55,7 @@ func createTestExporterHost(name string) *v1alpha1.ExporterHost {
 		},
 		Spec: v1alpha1.ExporterHostSpec{
 			Management: v1alpha1.Management{
-				SSH: v1alpha1.SSHCredentials{
+				SSH: &v1alpha1.SSHCredentials{
 					Host: "test-host.example.com",
 					User: "testuser",
 					Port: 22,
@@ -81,6 +81,16 @@ func TestSSHHostManagerCreation(t *testing.T) {
 			},
 			expectError: true, // Will fail because we can't actually connect
 			errorMsg:    "failed to connect to SSH host",
+		},
+		{
+			name: "missing management.ssh",
+			setupHost: func() *v1alpha1.ExporterHost {
+				host := createTestExporterHost("test-host")
+				host.Spec.Management.SSH = nil
+				return host
+			},
+			expectError: true,
+			errorMsg:    "has no management.ssh",
 		},
 		{
 			name: "missing SSH host",
@@ -385,5 +395,23 @@ func TestSanitizeDiff(t *testing.T) {
 			result := sanitizeDiff(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
+	}
+}
+
+func TestContentDiffRedactsLongTokens(t *testing.T) {
+	// cmp.Diff splits single-line contents like these into pieces after their common prefix
+	const (
+		oldToken = "eyJhbGciOiJSUzI1NiIsImtpZCI6Im9sZC1rZXkifQ.eyJzdWIiOiJib2FyZC0wMSIsImV4cCI6MTcwMDAwMDAwMH0." +
+			"OLDSIGNATUREaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		newToken = "eyJhbGciOiJSUzI1NiIsImtpZCI6Im9sZC1rZXkifQ.eyJzdWIiOiJib2FyZC0wMSIsImV4cCI6MTgwMDAwMDAwMH0." +
+			"NEWSIGNATUREbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	)
+
+	assert.Empty(t, ContentDiff("token: "+oldToken, "token: "+newToken))
+
+	diff := ContentDiff("endpoint: old\ntoken: "+oldToken, "endpoint: new\ntoken: "+newToken)
+	assert.Contains(t, diff, "endpoint: new")
+	for _, secret := range []string{"SIGNATURE", "MTcwMDAwMDAwMH0", "MTgwMDAwMDAwMH0"} {
+		assert.NotContains(t, diff, secret)
 	}
 }

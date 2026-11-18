@@ -50,6 +50,7 @@ var applyCmd = &cobra.Command{
 		filterExporters, _ := cmd.Flags().GetString("filter-exporters")
 		printCredentials, _ := cmd.Flags().GetBool("print-exporter-credentials")
 		parallel, _ := cmd.Flags().GetInt("parallel")
+		flightctlConfig, _ := cmd.Flags().GetString("flightctl-config")
 
 		// Determine config file path
 		configFilePath := defaultConfigFile
@@ -136,7 +137,7 @@ var applyCmd = &cobra.Command{
 		}
 
 		exporterHostSyncer := host.NewExporterHostSyncer(cfg, tapplier, serviceParametersMap, dryRun, debugConfigs,
-			exporterFilter, parallel)
+			exporterFilter, parallel, flightctlConfig)
 
 		err = exporterHostSyncer.SyncExporterHosts()
 		if err != nil {
@@ -174,6 +175,8 @@ func init() {
 	applyCmd.Flags().String("filter-exporters", "", "Regexp pattern to filter exporters by name")
 	applyCmd.Flags().Bool("print-exporter-credentials", false, "Print connection details for exporters")
 	applyCmd.Flags().Int("parallel", 10, "Number of hosts to process in parallel during ssh operation (0 for sequential)")
+	applyCmd.Flags().String("flightctl-config", "",
+		"Path to the flightctl client config written by 'flightctl login' (default: where the flightctl CLI keeps it)")
 
 	rootCmd.AddCommand(applyCmd)
 }

@@ -43,7 +43,40 @@ func Lint(cfg *config.Config) map[string][]error {
 	referencesErrors := validateReferences(cfg)
 	templateErrors := validateTemplates(cfg)
 	enabledErrors := validateEnabledConsistency(cfg)
-	return mergeErrors(mergeErrors(referencesErrors, templateErrors), enabledErrors)
+	managementErrors := validateExporterHostManagement(cfg)
+	return mergeErrors(mergeErrors(mergeErrors(referencesErrors, templateErrors), enabledErrors), managementErrors)
+}
+
+// sourceFileOf returns the file an object was loaded from.
+func sourceFileOf(cfg *config.Config, objectType, objectName string) string {
+	if typeMap, exists := cfg.Loaded.GetSourceFiles()[objectType]; exists {
+		if sourceFile, exists := typeMap[objectName]; exists {
+			return sourceFile
+		}
+	}
+	return "unknown"
+}
+
+// validateExporterHostManagement checks that an exporter host managed through flightctl selects its
+// device and is not managed over SSH as well.
+func validateExporterHostManagement(cfg *config.Config) map[string][]error {
+	errorsByFile := make(map[string][]error)
+	for name, host := range cfg.Loaded.GetExporterHosts() {
+		flightCtl := host.Spec.Management.FlightCtl
+		if flightCtl == nil {
+			continue
+		}
+		sourceFile := sourceFileOf(cfg, "ExporterHost", name)
+		if len(flightCtl.DeviceSelector) == 0 {
+			errorsByFile[sourceFile] = append(errorsByFile[sourceFile], fmt.Errorf(
+				"ExporterHost %s: management.flightctl.deviceSelector needs at least one label", name))
+		}
+		if host.Spec.Management.SSH != nil {
+			errorsByFile[sourceFile] = append(errorsByFile[sourceFile], fmt.Errorf(
+				"ExporterHost %s: management.ssh and management.flightctl are mutually exclusive", name))
+		}
+	}
+	return errorsByFile
 }
 
 func mergeErrors(map1, map2 map[string][]error) map[string][]error {
@@ -110,16 +143,6 @@ func validateTemplates(cfg *config.Config) map[string][]error {
 func validateReferences(cfg *config.Config) map[string][]error {
 	errorsByFile := make(map[string][]error)
 
-	// Helper function to get source file for an object
-	getSourceFile := func(objectType, objectName string) string {
-		if typeMap, exists := cfg.Loaded.GetSourceFiles()[objectType]; exists {
-			if sourceFile, exists := typeMap[objectName]; exists {
-				return sourceFile
-			}
-		}
-		return "unknown"
-	}
-
 	// Helper function to add error to the map
 	addError := func(sourceFile, errorMsg string) {
 		if errorsByFile[sourceFile] == nil {
@@ -132,7 +155,7 @@ func validateReferences(cfg *config.Config) map[string][]error {
 	for name, host := range cfg.Loaded.GetExporterHosts() {
 		if host.Spec.LocationRef.Name != "" {
 			if _, exists := cfg.Loaded.GetPhysicalLocations()[host.Spec.LocationRef.Name]; !exists {
-				sourceFile := getSourceFile("ExporterHost", name)
+				sourceFile := sourceFileOf(cfg, "ExporterHost", name)
 				addError(sourceFile, fmt.Sprintf("ExporterHost %s references non-existent location %s",
 					name, host.Spec.LocationRef.Name))
 			}
@@ -148,7 +171,7 @@ func validateReferences(cfg *config.Config) map[string][]error {
 			continue
 		}
 
-		sourceFile := getSourceFile("ExporterInstance", name)
+		sourceFile := sourceFileOf(cfg, "ExporterInstance", name)
 
 		// Check DutLocationRef
 		if instance.Spec.DutLocationRef.Name != "" {
