@@ -40,6 +40,17 @@ type ExporterHostSpec struct {
 
 type Management struct {
 	SSH SSHCredentials `json:"ssh,omitempty"`
+	// FlightCtl makes Flight Control deliver the exporter files to this host, instead of SSH.
+	FlightCtl *FlightCtlDevice `json:"flightctl,omitempty"`
+}
+
+// FlightCtlDevice identifies the Flight Control device that represents an exporter host.
+type FlightCtlDevice struct {
+	// DeviceSelector holds labels of the host's device. It must match exactly one device.
+	// Device names are key fingerprints that change when a host is reinstalled,
+	// so a label set at enrollment is the stable way to refer to a host.
+	// +kubebuilder:validation:MinProperties=1
+	DeviceSelector map[string]string `json:"deviceSelector"`
 }
 
 type SSHCredentials struct {
