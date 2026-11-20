@@ -67,6 +67,22 @@ spec:
                 description: Management options for the exporter host, could be SSH
                   access, flightctl device ids, etc..
                 properties:
+                  flightctl:
+                    description: FlightCtl makes Flight Control deliver the exporter
+                      files to this host, instead of SSH.
+                    properties:
+                      deviceSelector:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          DeviceSelector holds labels of the host's device. It must match exactly one device.
+                          Device names are key fingerprints that change when a host is reinstalled,
+                          so a label set at enrollment is the stable way to refer to a host.
+                        minProperties: 1
+                        type: object
+                    required:
+                    - deviceSelector
+                    type: object
                   ssh:
                     properties:
                       host:
