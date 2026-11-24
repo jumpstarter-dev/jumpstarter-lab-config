@@ -50,6 +50,7 @@ func validateRotationTarget(_ *cobra.Command, args []string) error {
 func runRotateCreds(cmd *cobra.Command, args []string) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	opts := rotationOptions{dryRun: dryRun}
+	opts.legacyOnly, _ = cmd.Flags().GetBool("legacy-only")
 	opts.wait, _ = cmd.Flags().GetBool("wait")
 	opts.waitTimeout, _ = cmd.Flags().GetDuration("wait-timeout")
 	opts.waitInterval, _ = cmd.Flags().GetDuration("wait-interval")
@@ -107,7 +108,7 @@ func runRotateCreds(cmd *cobra.Command, args []string) error {
 			failures = append(failures, rotateExporters(cmd, cfg, tapplier, inst, exporterFilter, opts))
 		}
 		if args[0] != rotationExporters {
-			failures = append(failures, rotateClients(cmd.Context(), cfg, inst, clientFilter, dryRun))
+			failures = append(failures, rotateClients(cmd.Context(), cfg, inst, clientFilter, opts))
 		}
 	}
 	return errors.Join(failures...)
@@ -135,8 +136,12 @@ func rotateExporters(cmd *cobra.Command, cfg *config.Config, tapplier *templatin
 	return rotateExporterBatch(cmd.Context(), inst.GetClient(), inst.GetConfig().Spec.Namespace, names, opts, out,
 		func(ctx context.Context, name string, force bool) error {
 			exporter := cfg.Loaded.ExporterInstances[name]
-			if err := rotateExporter(ctx, cfg, tapplier, inst, exporter, opts.dryRun, force); err != nil {
-				return err
+			if err := rotateExporter(ctx, cfg, tapplier, inst, exporter, opts, force); err != nil {
+				if !errors.Is(err, instance.ErrNotLegacyCredential) {
+					return err
+				}
+				_, _ = fmt.Fprintf(out, "⏸️  [%s] Skipping exporter %s: %s\n", inst.GetConfig().Name, name, err)
+				return nil
 			}
 			switch {
 			case opts.dryRun:
@@ -154,7 +159,7 @@ func rotateExporters(cmd *cobra.Command, cfg *config.Config, tapplier *templatin
 }
 
 func rotateExporter(ctx context.Context, cfg *config.Config, tapplier *templating.TemplateApplier,
-	inst *instance.Instance, exporter *api.ExporterInstance, dryRun, forceRestart bool) error {
+	inst *instance.Instance, exporter *api.ExporterInstance, opts rotationOptions, forceRestart bool) error {
 	host := cfg.Loaded.ExporterHosts[exporter.Spec.ExporterHostRef.Name]
 	if host == nil {
 		return fmt.Errorf("exporter host %s not found", exporter.Spec.ExporterHostRef.Name)
@@ -177,12 +182,13 @@ func rotateExporter(ctx context.Context, cfg *config.Config, tapplier *templatin
 	}
 	defer func() { _ = hostSSH.Close() }()
 	rotated := false
-	err = hostSSH.RotateCredentials(rendered.Spec.ExporterMetadata.Name, dryRun, forceRestart, func() (string, error) {
-		secret, err := inst.RotateCredentials(ctx, "exporter", exporter.Name)
+	service := rendered.Spec.ExporterMetadata.Name
+	err = hostSSH.RotateCredentials(service, opts.dryRun, forceRestart, func() (string, error) {
+		secret, err := inst.RotateCredentials(ctx, "exporter", exporter.Name, opts.legacyOnly)
 		if err != nil {
 			return "", err
 		}
-		rotated = !dryRun
+		rotated = !opts.dryRun
 		return string(secret.Data["token"]), nil
 	})
 	if err != nil && rotated {
@@ -193,7 +199,7 @@ func rotateExporter(ctx context.Context, cfg *config.Config, tapplier *templatin
 }
 
 func rotateClients(ctx context.Context, cfg *config.Config, inst *instance.Instance,
-	filter *regexp.Regexp, dryRun bool) error {
+	filter *regexp.Regexp, opts rotationOptions) error {
 	name := inst.GetConfig().Name
 	if !cfg.Instances[name].Clients.IsEnabled(cfg.Sources.Clients, inst.GetConfig().Spec.SyncClients) {
 		return nil
@@ -203,14 +209,18 @@ func rotateClients(ctx context.Context, cfg *config.Config, inst *instance.Insta
 		if !filter.MatchString(clientName) {
 			continue
 		}
-		secret, err := inst.RotateCredentials(ctx, "client", clientName)
+		secret, err := inst.RotateCredentials(ctx, "client", clientName, opts.legacyOnly)
+		if errors.Is(err, instance.ErrNotLegacyCredential) {
+			fmt.Printf("⏸️  [%s] Skipping client %s: %s\n", name, clientName, err)
+			continue
+		}
 		if err != nil {
 			failure := fmt.Errorf("[%s] client %s: %w", name, clientName, err)
 			fmt.Printf("❌ %s\n", failure)
 			failures = append(failures, failure)
 			continue
 		}
-		if dryRun {
+		if opts.dryRun {
 			fmt.Printf("📄 [%s] Would rotate client %s\n", name, clientName)
 		} else {
 			fmt.Printf("✅ [%s] Client %s rotated; retrieve replacement from Secret %s/%s\n",
@@ -221,6 +231,8 @@ func rotateClients(ctx context.Context, cfg *config.Config, inst *instance.Insta
 }
 
 func init() {
+	rotateCredsCmd.Flags().Bool("legacy-only", false,
+		"Only rotate credentials with a nonempty jumpstarter.dev/legacy-token-hash annotation")
 	rotateCredsCmd.Flags().Bool("dry-run", false,
 		"Check exporter SSH access and preview rotation without changing credentials or files")
 	rotateCredsCmd.Flags().String("vault-password-file", "", "Path to the vault password file for decrypting variables")

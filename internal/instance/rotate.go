@@ -2,6 +2,7 @@ package instance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,9 +12,36 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// ErrNotLegacyCredential indicates a resource excluded by the legacy-only filter.
+var ErrNotLegacyCredential = errors.New("no legacy-token-hash credential")
+
+// CredentialForRotation validates ownership and applies the optional legacy filter.
+// Selection and deletion use the same checks; deletion must read the Secret again.
+func CredentialForRotation(ctx context.Context, reader client.Reader, owner client.Object,
+	credential *corev1.LocalObjectReference, legacyOnly bool) (*corev1.Secret, error) {
+	if credential == nil || credential.Name == "" {
+		if legacyOnly {
+			return nil, ErrNotLegacyCredential
+		}
+		return nil, fmt.Errorf("%s has no internal credential Secret", owner.GetName())
+	}
+	key := client.ObjectKey{Namespace: owner.GetNamespace(), Name: credential.Name}
+	secret := &corev1.Secret{}
+	if err := reader.Get(ctx, key, secret); err != nil {
+		return nil, err
+	}
+	if !metav1.IsControlledBy(secret, owner) || owner.GetUID() == "" {
+		return nil, fmt.Errorf("credential Secret %s is not controlled by %s", key, owner.GetName())
+	}
+	if legacyOnly && secret.Annotations["jumpstarter.dev/legacy-token-hash"] == "" {
+		return nil, ErrNotLegacyCredential
+	}
+	return secret, nil
+}
+
 // RotateCredentials asks the controller to regenerate an existing credential.
 // The caller must check delivery access before calling this for an exporter.
-func (i *Instance) RotateCredentials(ctx context.Context, kind, name string) (*corev1.Secret, error) {
+func (i *Instance) RotateCredentials(ctx context.Context, kind, name string, legacyOnly bool) (*corev1.Secret, error) {
 	var owner client.Object
 	var credential *corev1.LocalObjectReference
 	switch kind {
@@ -32,17 +60,11 @@ func (i *Instance) RotateCredentials(ctx context.Context, kind, name string) (*c
 	default:
 		return nil, fmt.Errorf("unsupported credential kind %q", kind)
 	}
-	if credential == nil || credential.Name == "" {
-		return nil, fmt.Errorf("%s %s has no internal credential Secret", kind, name)
-	}
-	key := client.ObjectKey{Namespace: owner.GetNamespace(), Name: credential.Name}
-	old := &corev1.Secret{}
-	if err := i.client.Get(ctx, key, old); err != nil {
+	old, err := CredentialForRotation(ctx, i.client, owner, credential, legacyOnly)
+	if err != nil {
 		return nil, err
 	}
-	if !metav1.IsControlledBy(old, owner) || owner.GetUID() == "" {
-		return nil, fmt.Errorf("credential Secret %s is not controlled by %s %s", key, kind, name)
-	}
+	key := client.ObjectKeyFromObject(old)
 	if i.dryRun {
 		return old, nil
 	}
@@ -55,7 +77,7 @@ func (i *Instance) RotateCredentials(ctx context.Context, kind, name string) (*c
 		return nil, fmt.Errorf("delete credential Secret %s: %w", key, err)
 	}
 	replacement := &corev1.Secret{}
-	err := wait.PollUntilContextTimeout(ctx, time.Second, 90*time.Second, true, func(ctx context.Context) (bool, error) {
+	err = wait.PollUntilContextTimeout(ctx, time.Second, 90*time.Second, true, func(ctx context.Context) (bool, error) {
 		if err := i.client.Get(ctx, key, replacement); err != nil {
 			return false, client.IgnoreNotFound(err)
 		}

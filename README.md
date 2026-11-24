@@ -179,6 +179,7 @@ Applying changes:
 
 ```shell
 jumpstarter-lab-config rotate-creds exporters --dry-run
+jumpstarter-lab-config rotate-creds all --legacy-only --dry-run
 jumpstarter-lab-config rotate-creds exporters --filter-exporters '^board-01$'
 jumpstarter-lab-config rotate-creds exporters --wait --wait-timeout 30m
 jumpstarter-lab-config rotate-creds exporters --force-leased '^board-01$' --dry-run
@@ -202,6 +203,16 @@ file, vault password, and name-filter conventions as `apply`. For each exporter:
 5. Request a lease-aware restart with SIGHUP, as `apply` does, or restart an
    inactive service. SIGHUP covers a lease starting between the check and deletion.
    Forced leased rotations use an immediate `systemctl restart` instead.
+
+`--legacy-only` selects only credential Secrets with a nonempty
+`jumpstarter.dev/legacy-token-hash` annotation, for exporters, clients, or `all`.
+Resources without that annotation (or without internal credentials) are reported
+as skipped. Exporters are filtered before lease waiting and SSH access, and the
+annotation is checked again before deletion using the same UID/resource-version
+preconditions. It combines with name filters, `--wait`, `--force-leased`, and
+`--dry-run`; forcing does not override this filter. The annotation is the selection
+criterion, not a check of the installed token. If an earlier rotation generated a
+new unannotated Secret but delivery failed, use filtered `apply` to deliver it.
 
 `--wait` rotates free exporters first and rechecks skipped exporters every
 `--wait-interval` (default 10s), rotating each once it becomes free. The

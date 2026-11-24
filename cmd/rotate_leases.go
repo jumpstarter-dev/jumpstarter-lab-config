@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/instance"
 	js "github.com/jumpstarter-dev/jumpstarter/controller/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -16,7 +17,7 @@ import (
 )
 
 type rotationOptions struct {
-	dryRun, wait              bool
+	dryRun, wait, legacyOnly  bool
 	waitInterval, waitTimeout time.Duration
 	forceLeased               *regexp.Regexp
 }
@@ -35,7 +36,11 @@ func rotateExporterBatch(ctx context.Context, reader client.Reader, namespace st
 				pending = append(waiting, pending[index:]...)
 				return false, err
 			}
-			lease, err := rotationLease(ctx, reader, client.ObjectKey{Namespace: namespace, Name: name})
+			lease, err := rotationLease(ctx, reader, client.ObjectKey{Namespace: namespace, Name: name}, opts.legacyOnly)
+			if errors.Is(err, instance.ErrNotLegacyCredential) {
+				_, _ = fmt.Fprintf(out, "⏸️  Skipping exporter %s/%s: %s\n", namespace, name, err)
+				continue
+			}
 			force := lease != nil && opts.forceLeased != nil && opts.forceLeased.MatchString(name)
 			if err == nil && lease != nil {
 				if !headerPrinted {
@@ -83,10 +88,15 @@ func rotateExporterBatch(ctx context.Context, reader client.Reader, namespace st
 }
 
 func rotationLease(ctx context.Context, reader client.Reader,
-	key client.ObjectKey) (*unstructured.Unstructured, error) {
+	key client.ObjectKey, legacyOnly bool) (*unstructured.Unstructured, error) {
 	exporter := &js.Exporter{}
 	if err := reader.Get(ctx, key, exporter); err != nil {
 		return nil, err
+	}
+	if legacyOnly {
+		if _, err := instance.CredentialForRotation(ctx, reader, exporter, exporter.Status.Credential, true); err != nil {
+			return nil, err
+		}
 	}
 	if exporter.Status.LeaseRef == nil {
 		return nil, nil

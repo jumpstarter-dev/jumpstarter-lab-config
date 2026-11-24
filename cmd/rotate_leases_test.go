@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"regexp"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,10 +23,12 @@ import (
 func TestRotateExporterBatch(t *testing.T) {
 	for _, scenario := range []string{
 		"skip", "dry run wait", "force", "dry run force", "wait", "timeout", "missing lease", "canceled",
+		"legacy wait", "legacy force", "legacy dry run",
 	} {
 		t.Run(scenario, func(t *testing.T) {
 			scheme := runtime.NewScheme()
 			scheme.AddKnownTypes(js.GroupVersion, &js.Exporter{})
+			require.NoError(t, corev1.AddToScheme(scheme))
 			// Keep new Lease fields that the pinned typed API does not know.
 			scheme.AddKnownTypeWithName(js.GroupVersion.WithKind("Lease"), &unstructured.Unstructured{})
 			var objects []client.Object
@@ -44,6 +48,19 @@ func TestRotateExporterBatch(t *testing.T) {
 					}
 				}
 				objects = append(objects, exporter)
+				if strings.HasPrefix(scenario, "legacy") {
+					exporter.UID = "exporter-uid"
+					exporter.Status.Credential = &corev1.LocalObjectReference{Name: name + "-credential"}
+					secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+						Name: name + "-credential", Namespace: "lab",
+						OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(exporter,
+							js.GroupVersion.WithKind("Exporter"))},
+					}}
+					if name != "busy-b" {
+						secret.Annotations = map[string]string{"jumpstarter.dev/legacy-token-hash": "hash"}
+					}
+					objects = append(objects, secret)
+				}
 			}
 			reads := map[string]int{}
 			kc := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&js.Exporter{}).WithObjects(objects...).
@@ -60,6 +77,9 @@ func TestRotateExporterBatch(t *testing.T) {
 								exporter.Status.LeaseRef = nil
 								return c.Status().Update(ctx, exporter)
 							}
+						} else if secret, ok := obj.(*corev1.Secret); ok && scenario == "legacy wait" && reads["busy-a"] == 2 {
+							// Another rotator migrates the credential while its lease remains active.
+							secret.Annotations = nil
 						} else if lease, ok := obj.(*unstructured.Unstructured); ok && scenario == "wait" && reads["busy-b"] == 2 {
 							// A fresh API read must report a lease extension, not a cached end time.
 							return unstructured.SetNestedField(lease.Object, "2026-11-24T12:00:00Z", "spec", "endTime")
@@ -68,13 +88,15 @@ func TestRotateExporterBatch(t *testing.T) {
 					},
 				}).Build()
 			opts := rotationOptions{waitInterval: time.Millisecond, waitTimeout: 30 * time.Millisecond}
+			opts.legacyOnly = strings.HasPrefix(scenario, "legacy")
+			opts.wait = slices.Contains([]string{"wait", "timeout", "dry run wait", "legacy wait"}, scenario)
 			switch scenario {
-			case "wait", "timeout", "dry run wait":
-				opts.wait = true
 			case "force", "dry run force":
 				opts.forceLeased = regexp.MustCompile("^busy-a$")
+			case "legacy force", "legacy dry run":
+				opts.forceLeased = regexp.MustCompile(".*")
 			}
-			opts.dryRun = scenario == "dry run wait" || scenario == "dry run force"
+			opts.dryRun = strings.Contains(scenario, "dry run")
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			if scenario == "canceled" {
@@ -108,7 +130,7 @@ func TestRotateExporterBatch(t *testing.T) {
 			case "wait":
 				require.Equal(t, []string{"free", "busy-a", "busy-b"}, rotated)
 				require.Contains(t, out.String(), "2026-11-24T12:00:00Z")
-			case "force", "dry run force":
+			case "force", "dry run force", "legacy force", "legacy dry run":
 				require.Equal(t, []string{"busy-a", "free"}, rotated)
 			default:
 				require.Equal(t, []string{"free"}, rotated)
@@ -116,6 +138,8 @@ func TestRotateExporterBatch(t *testing.T) {
 			require.Contains(t, out.String(), "alice, bob")
 			require.Contains(t, out.String(), "2026-11-24T11:00:00Z")
 			require.Equal(t, 1, reads["free"], "do not rotate already processed exporters again")
+			require.Equal(t, opts.legacyOnly,
+				strings.Contains(out.String(), "Skipping exporter lab/busy-b: no legacy-token-hash credential"))
 		})
 	}
 }
