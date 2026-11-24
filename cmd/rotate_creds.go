@@ -7,6 +7,8 @@ import (
 	"maps"
 	"regexp"
 	"slices"
+	"strings"
+	"time"
 
 	api "github.com/jumpstarter-dev/jumpstarter-lab-config/api/v1alpha1"
 	"github.com/jumpstarter-dev/jumpstarter-lab-config/internal/config"
@@ -27,8 +29,10 @@ var rotateCredsCmd = &cobra.Command{
 	Use:   "rotate-creds {exporters|clients|all} [config-file]",
 	Short: "Rotate controller credentials and deliver exporter tokens over SSH",
 	Long: `Rotate credentials for configured resources, one at a time.
+Leased exporters are skipped by default; --wait rechecks them, and --force-leased
+requires an exporter-name regexp and restarts matching leased exporters immediately.
 Exporters are checked over SSH before rotation; their installed token is replaced
-and a lease-aware restart is requested. Clients' new tokens remain in controller
+and otherwise a lease-aware restart is requested. Clients' new tokens remain in controller
 Secrets for distribution to their users. Token values are never printed.`,
 	ValidArgs:    []string{rotationExporters, rotationClients, "all"},
 	Args:         cobra.MatchAll(cobra.RangeArgs(1, 2), validateRotationTarget),
@@ -45,6 +49,24 @@ func validateRotationTarget(_ *cobra.Command, args []string) error {
 
 func runRotateCreds(cmd *cobra.Command, args []string) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	opts := rotationOptions{dryRun: dryRun}
+	opts.wait, _ = cmd.Flags().GetBool("wait")
+	opts.waitTimeout, _ = cmd.Flags().GetDuration("wait-timeout")
+	opts.waitInterval, _ = cmd.Flags().GetDuration("wait-interval")
+	if opts.waitTimeout <= 0 || opts.waitInterval <= 0 {
+		return fmt.Errorf("wait timeout and interval must be positive")
+	}
+	if cmd.Flags().Changed("force-leased") {
+		pattern, _ := cmd.Flags().GetString("force-leased")
+		if strings.TrimSpace(pattern) == "" {
+			return fmt.Errorf("--force-leased requires a non-empty exporter-name regexp")
+		}
+		var err error
+		opts.forceLeased, err = regexp.Compile(pattern)
+		if err != nil {
+			return fmt.Errorf("invalid force-leased filter: %w", err)
+		}
+	}
 	vaultPassFile, _ := cmd.Flags().GetString("vault-password-file")
 	exporterPattern, _ := cmd.Flags().GetString("filter-exporters")
 	clientPattern, _ := cmd.Flags().GetString("filter-clients")
@@ -82,7 +104,7 @@ func runRotateCreds(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if args[0] != rotationClients {
-			failures = append(failures, rotateExporters(cmd.Context(), cfg, tapplier, inst, exporterFilter, dryRun))
+			failures = append(failures, rotateExporters(cmd, cfg, tapplier, inst, exporterFilter, opts))
 		}
 		if args[0] != rotationExporters {
 			failures = append(failures, rotateClients(cmd.Context(), cfg, inst, clientFilter, dryRun))
@@ -91,9 +113,10 @@ func runRotateCreds(cmd *cobra.Command, args []string) error {
 	return errors.Join(failures...)
 }
 
-func rotateExporters(ctx context.Context, cfg *config.Config, tapplier *templating.TemplateApplier,
-	inst *instance.Instance, filter *regexp.Regexp, dryRun bool) error {
-	var failures []error
+func rotateExporters(cmd *cobra.Command, cfg *config.Config, tapplier *templating.TemplateApplier,
+	inst *instance.Instance, filter *regexp.Regexp, opts rotationOptions) error {
+	var names []string
+	out := cmd.OutOrStdout()
 	for _, name := range slices.Sorted(maps.Keys(cfg.Loaded.ExporterInstances)) {
 		exporter := cfg.Loaded.ExporterInstances[name]
 		if exporter == nil || exporter.Spec.JumpstarterInstanceRef.Name != inst.GetConfig().Name ||
@@ -103,26 +126,35 @@ func rotateExporters(ctx context.Context, cfg *config.Config, tapplier *templati
 		dead, _ := exporter.IsDead()
 		unmanaged, _ := exporter.IsUnmanaged()
 		if dead || unmanaged || exporter.Spec.ExporterHostRef.Name == "" {
-			fmt.Printf("⏸️  [%s] Skipping exporter %s: dead, unmanaged, or no SSH host\n", inst.GetConfig().Name, name)
+			_, _ = fmt.Fprintf(out, "⏸️  [%s] Skipping exporter %s: dead, unmanaged, or no SSH host\n",
+				inst.GetConfig().Name, name)
 			continue
 		}
-		if err := rotateExporter(ctx, cfg, tapplier, inst, exporter, dryRun); err != nil {
-			failure := fmt.Errorf("[%s] exporter %s: %w", inst.GetConfig().Name, name, err)
-			fmt.Printf("❌ %s\n", failure)
-			failures = append(failures, failure)
-			continue
-		}
-		if dryRun {
-			fmt.Printf("📄 [%s] Would rotate exporter %s (SSH preflight passed)\n", inst.GetConfig().Name, name)
-		} else {
-			fmt.Printf("✅ [%s] Exporter %s token installed; lease-aware restart requested\n", inst.GetConfig().Name, name)
-		}
+		names = append(names, name)
 	}
-	return errors.Join(failures...)
+	return rotateExporterBatch(cmd.Context(), inst.GetClient(), inst.GetConfig().Spec.Namespace, names, opts, out,
+		func(ctx context.Context, name string, force bool) error {
+			exporter := cfg.Loaded.ExporterInstances[name]
+			if err := rotateExporter(ctx, cfg, tapplier, inst, exporter, opts.dryRun, force); err != nil {
+				return err
+			}
+			switch {
+			case opts.dryRun:
+				_, _ = fmt.Fprintf(out, "📄 [%s] Would rotate exporter %s (SSH and controller checks passed)\n",
+					inst.GetConfig().Name, name)
+			case force:
+				_, _ = fmt.Fprintf(out, "✅ [%s] Exporter %s token installed; immediate restart completed\n",
+					inst.GetConfig().Name, name)
+			default:
+				_, _ = fmt.Fprintf(out, "✅ [%s] Exporter %s token installed; lease-aware restart requested\n",
+					inst.GetConfig().Name, name)
+			}
+			return nil
+		})
 }
 
 func rotateExporter(ctx context.Context, cfg *config.Config, tapplier *templating.TemplateApplier,
-	inst *instance.Instance, exporter *api.ExporterInstance, dryRun bool) error {
+	inst *instance.Instance, exporter *api.ExporterInstance, dryRun, forceRestart bool) error {
 	host := cfg.Loaded.ExporterHosts[exporter.Spec.ExporterHostRef.Name]
 	if host == nil {
 		return fmt.Errorf("exporter host %s not found", exporter.Spec.ExporterHostRef.Name)
@@ -145,7 +177,7 @@ func rotateExporter(ctx context.Context, cfg *config.Config, tapplier *templatin
 	}
 	defer func() { _ = hostSSH.Close() }()
 	rotated := false
-	err = hostSSH.RotateCredentials(rendered.Spec.ExporterMetadata.Name, dryRun, false, func() (string, error) {
+	err = hostSSH.RotateCredentials(rendered.Spec.ExporterMetadata.Name, dryRun, forceRestart, func() (string, error) {
 		secret, err := inst.RotateCredentials(ctx, "exporter", exporter.Name)
 		if err != nil {
 			return "", err
@@ -194,5 +226,10 @@ func init() {
 	rotateCredsCmd.Flags().String("vault-password-file", "", "Path to the vault password file for decrypting variables")
 	rotateCredsCmd.Flags().String("filter-clients", "", "Regexp pattern to filter clients by name")
 	rotateCredsCmd.Flags().String("filter-exporters", "", "Regexp pattern to filter exporters by name")
+	rotateCredsCmd.Flags().Bool("wait", false, "Wait for leased exporters to become free (dry runs never wait)")
+	rotateCredsCmd.Flags().Duration("wait-timeout", 30*time.Minute, "Maximum wait per instance, including rotations")
+	rotateCredsCmd.Flags().Duration("wait-interval", 10*time.Second, "Interval between fresh lease checks")
+	rotateCredsCmd.Flags().String("force-leased", "",
+		"Regexp selecting leased exporters to rotate and immediately restart")
 	rootCmd.AddCommand(rotateCredsCmd)
 }

@@ -180,6 +180,8 @@ Applying changes:
 ```shell
 jumpstarter-lab-config rotate-creds exporters --dry-run
 jumpstarter-lab-config rotate-creds exporters --filter-exporters '^board-01$'
+jumpstarter-lab-config rotate-creds exporters --wait --wait-timeout 30m
+jumpstarter-lab-config rotate-creds exporters --force-leased '^board-01$' --dry-run
 jumpstarter-lab-config rotate-creds clients --filter-clients '^alice$'
 jumpstarter-lab-config rotate-creds all my-lab-config.yaml
 ```
@@ -187,16 +189,34 @@ jumpstarter-lab-config rotate-creds all my-lab-config.yaml
 `rotate-creds` processes configured resources sequentially, with the same config
 file, vault password, and name-filter conventions as `apply`. For each exporter:
 
-1. Connect to its configured host over SSH/SFTP and check the installed exporter
+1. Check its current lease. Leased exporters are skipped by default; their lease,
+   owner/shared holders, and current end time are printed for coordination.
+2. Connect to its configured host over SSH/SFTP and check the installed exporter
    YAML, write access, and systemd unit. A failed preflight leaves its controller
    credential unchanged.
-2. Delete its credential Secret and wait up to 90 seconds for the controller to
+3. Delete its credential Secret and wait up to 90 seconds for the controller to
    regenerate it. The deletion uses UID/resource-version preconditions, and the
    replacement must belong to the same exporter.
-3. Atomically replace only the token in `/etc/jumpstarter/exporters/<service>.yaml`,
+4. Atomically replace only the token in `/etc/jumpstarter/exporters/<service>.yaml`,
    preserving the other configuration values, comments, ownership and permissions.
-4. Request a lease-aware restart with SIGHUP, as `apply` does, or restart an
-   inactive service. A leased exporter loads the new token when its lease ends.
+5. Request a lease-aware restart with SIGHUP, as `apply` does, or restart an
+   inactive service. SIGHUP covers a lease starting between the check and deletion.
+   Forced leased rotations use an immediate `systemctl restart` instead.
+
+`--wait` rotates free exporters first and rechecks skipped exporters every
+`--wait-interval` (default 10s), rotating each once it becomes free. The
+`--wait-timeout` (default 30m) bounds the operation per instance, including rotations;
+timeout exits nonzero and names the pending exporters. In-flight SSH operations
+finish before the timeout is reported. Lease end times are read
+again on every pass, including extensions; they are informational, not a schedule
+for deciding when an exporter is free.
+
+`--force-leased <regexp>` explicitly selects leased exporters for immediate
+rotation/restart, interrupting their sessions. It is intersected with
+`--filter-exporters`; nonmatching leased exporters remain skipped (or waited for
+with `--wait`). Holders are printed before each forced rotation. Run `--dry-run`
+first to see the same holder/end-time table and notify users. Dry runs never wait
+or restart anything, even with `--wait` or `--force-leased`.
 
 The service name comes from the exporter's rendered config template. Dead,
 unmanaged, and hostless exporters are skipped. Failures are reported per resource;
