@@ -86,7 +86,7 @@ func rotationTestHost(t *testing.T, failCommand string) (*SSHHostManager, <-chan
 func TestRotateExporterCredentials(t *testing.T) {
 	const filename = "/etc/jumpstarter/exporters/board.yaml"
 	const config = "# keep this comment\r\ntoken: \"old-token\"  # credential\r\nendpoint: 'controller:443'\r\ndriver:\r\n  cls: example.Driver\r\n  token: old-token\r\n  data: {hex: 0x10, flag: true}\r\n"
-	for _, scenario := range []string{"rotate", "plain token", "single quoted token", "flow token", "special token", "dry run", "preflight fails", "missing config", "invalid config", "unsupported token", "rotation fails", "restart fails"} {
+	for _, scenario := range []string{"rotate", "plain token", "single quoted token", "flow token", "special token", "dry run", "dry run rotation fails", "preflight fails", "missing config", "invalid config", "unsupported token", "rotation fails", "restart fails"} {
 		t.Run(scenario, func(t *testing.T) {
 			failCommand := ""
 			switch scenario {
@@ -131,7 +131,7 @@ func TestRotateExporterCredentials(t *testing.T) {
 			if scenario == "special token" {
 				newToken = "new: [token], # \"quoted\"\nnext\\line"
 			}
-			err := m.RotateCredentials("board", scenario == "dry run", func() (string, error) {
+			err := m.RotateCredentials("board", strings.HasPrefix(scenario, "dry run"), func() (string, error) {
 				rotations++
 				// The preflight command must have completed before controller mutation.
 				select {
@@ -140,7 +140,7 @@ func TestRotateExporterCredentials(t *testing.T) {
 				default:
 					t.Fatal("rotation happened before SSH preflight")
 				}
-				if scenario == "rotation fails" {
+				if strings.HasSuffix(scenario, "rotation fails") {
 					return "", errors.New("controller unavailable")
 				}
 				return newToken, nil
@@ -150,7 +150,7 @@ func TestRotateExporterCredentials(t *testing.T) {
 			} else {
 				require.Error(t, err)
 			}
-			if success || scenario == "rotation fails" || scenario == "restart fails" {
+			if success || strings.HasPrefix(scenario, "dry run") || scenario == "rotation fails" || scenario == "restart fails" {
 				require.Equal(t, 1, rotations)
 			} else {
 				require.Zero(t, rotations)

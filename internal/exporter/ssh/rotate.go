@@ -17,6 +17,7 @@ import (
 
 // RotateCredentials checks the installed config before invoking rotate, then
 // replaces only its token. Keep this SSH connection open throughout rotation.
+// In dry-run mode, rotate must validate the controller credential without changing it.
 func (m *SSHHostManager) RotateCredentials(service string, dryRun bool, rotate func() (string, error)) error {
 	if len(validation.IsDNS1123Subdomain(service)) != 0 {
 		return fmt.Errorf("invalid exporter service name %q", service)
@@ -56,7 +57,8 @@ func (m *SSHHostManager) RotateCredentials(service string, dryRun bool, rotate f
 		return fmt.Errorf("exporter preflight failed: %w", err)
 	}
 	if dryRun {
-		return nil
+		_, err := rotate()
+		return err
 	}
 	// Stage beside the destination, before rotating, to check SFTP write access.
 	staged := filename + ".rotate-" + rand.Text()

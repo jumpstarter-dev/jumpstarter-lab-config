@@ -150,7 +150,7 @@ func rotateExporter(ctx context.Context, cfg *config.Config, tapplier *templatin
 		if err != nil {
 			return "", err
 		}
-		rotated = true
+		rotated = !dryRun
 		return string(secret.Data["token"]), nil
 	})
 	if err != nil && rotated {

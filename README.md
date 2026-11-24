@@ -212,8 +212,9 @@ to users (for example through `jmp admin import client <name> --namespace <names
 --out client.yaml`, using the appropriate cluster context). Token values are never
 printed. Resources without internal credential Secrets cannot be rotated this way.
 
-`--dry-run` performs exporter SSH/read-access checks without changing remote files
-or controller credentials; for clients it verifies the existing credential Secret.
+`--dry-run` performs exporter SSH/read-access checks and verifies the controller
+credential Secret and its ownership, without changing remote files or credentials.
+It also verifies existing client credential Secrets and their ownership.
 Rotation requires Kubernetes get/delete access to credential Secrets and get access
 to their Client/Exporter resources, plus a running controller to regenerate them.
 Exporter hosts need SFTP's POSIX rename extension and permission to update their
