@@ -175,6 +175,54 @@ Applying changes:
 ```
 
 
+### Rotating credentials
+
+```shell
+jumpstarter-lab-config rotate-creds exporters --dry-run
+jumpstarter-lab-config rotate-creds exporters --filter-exporters '^board-01$'
+jumpstarter-lab-config rotate-creds clients --filter-clients '^alice$'
+jumpstarter-lab-config rotate-creds all my-lab-config.yaml
+```
+
+`rotate-creds` processes configured resources sequentially, with the same config
+file, vault password, and name-filter conventions as `apply`. For each exporter:
+
+1. Connect to its configured host over SSH/SFTP and check the installed exporter
+   YAML, write access, and systemd unit. A failed preflight leaves its controller
+   credential unchanged.
+2. Delete its credential Secret and wait up to 90 seconds for the controller to
+   regenerate it. The deletion uses UID/resource-version preconditions, and the
+   replacement must belong to the same exporter.
+3. Atomically replace only the token in `/etc/jumpstarter/exporters/<service>.yaml`,
+   preserving the other configuration values, comments, ownership and permissions.
+4. Request a lease-aware restart with SIGHUP, as `apply` does, or restart an
+   inactive service. A leased exporter loads the new token when its lease ends.
+
+The service name comes from the exporter's rendered config template. Dead,
+unmanaged, and hostless exporters are skipped. Failures are reported per resource;
+the command continues with the others and exits nonzero if any failed. If rotation
+succeeded but installation or restart failed, retry that exporter, or use
+`apply --filter-exporters '^name$'` to deliver the current controller credential.
+No bootc or container-image updates are performed by `rotate-creds`.
+
+`clients` rotates only clients selected for synchronization on each instance.
+Client machines have no SSH destinations in the lab configuration, so replacements
+remain in the controller Secrets; the command prints their names for distribution
+to users (for example through `jmp admin import client <name> --namespace <namespace>
+--out client.yaml`, using the appropriate cluster context). Token values are never
+printed. Resources without internal credential Secrets cannot be rotated this way.
+
+`--dry-run` performs exporter SSH/read-access checks without changing remote files
+or controller credentials; for clients it verifies the existing credential Secret.
+Rotation requires Kubernetes get/delete access to credential Secrets and get access
+to their Client/Exporter resources, plus a running controller to regenerate them.
+Exporter hosts need SFTP's POSIX rename extension and permission to update their
+config files and signal their services.
+
+This regenerates credentials; it does **not** revoke otherwise-valid signed JWTs.
+Old tokens may remain valid until expiry unless the controller's signing key or
+authentication policy has changed.
+
 ### Synchronizing access policies
 
 Include `ExporterAccessPolicy` manifests through `sources.policies`:
