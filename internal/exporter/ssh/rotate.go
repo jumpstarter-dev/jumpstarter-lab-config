@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"path"
+	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/pkg/sftp"
 	"gopkg.in/yaml.v3"
@@ -36,7 +38,11 @@ func (m *SSHHostManager) RotateCredentials(service string, dryRun bool, rotate f
 	if err != nil {
 		return fmt.Errorf("read installed exporter config: %w", err)
 	}
-	doc, token, err := exporterToken(content)
+	token, err := exporterToken(content)
+	if err != nil {
+		return err
+	}
+	start, end, err := exporterTokenRange(content, token)
 	if err != nil {
 		return err
 	}
@@ -75,12 +81,18 @@ func (m *SSHHostManager) RotateCredentials(service string, dryRun bool, rotate f
 	if strings.TrimSpace(newToken) == "" {
 		return fmt.Errorf("controller returned an empty token")
 	}
-	token.Value = newToken
-	updated, err := yaml.Marshal(doc)
+	// Keep the existing quoting for normal credential characters. Other values
+	// need double quotes to stay single-line and safe in flow mappings.
+	style := yaml.DoubleQuotedStyle
+	if simpleToken.MatchString(newToken) {
+		style = token.Style
+	}
+	encoded, err := yaml.Marshal(&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Style: style, Value: newToken})
 	if err != nil {
 		return fmt.Errorf("could not encode updated exporter config")
 	}
-	if _, err := f.Write(updated); err != nil {
+	updated := string(content[:start]) + strings.TrimSuffix(string(encoded), "\n") + string(content[end:])
+	if _, err := f.Write([]byte(updated)); err != nil {
 		return fmt.Errorf("write replacement exporter config: %w", err)
 	}
 	if err := f.Chmod(info.Mode().Perm()); err != nil {
@@ -103,28 +115,57 @@ func (m *SSHHostManager) RotateCredentials(service string, dryRun bool, rotate f
 	return nil
 }
 
-func exporterToken(content []byte) (*yaml.Node, *yaml.Node, error) {
+func exporterToken(content []byte) (*yaml.Node, error) {
 	var doc yaml.Node
 	decoder := yaml.NewDecoder(strings.NewReader(string(content)))
 	if decoder.Decode(&doc) != nil || len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
-		return nil, nil, fmt.Errorf("installed exporter config must be a YAML mapping")
+		return nil, fmt.Errorf("installed exporter config must be a YAML mapping")
 	}
 	var extra yaml.Node
 	if decoder.Decode(&extra) != io.EOF {
-		return nil, nil, fmt.Errorf("installed exporter config must contain one YAML document")
+		return nil, fmt.Errorf("installed exporter config must contain one YAML document")
 	}
 	var token *yaml.Node
 	fields := doc.Content[0].Content
 	for n := 0; n < len(fields); n += 2 {
 		if fields[n].Value == "token" {
 			if token != nil {
-				return nil, nil, fmt.Errorf("installed exporter config contains duplicate token fields")
+				return nil, fmt.Errorf("installed exporter config contains duplicate token fields")
 			}
 			token = fields[n+1]
 		}
 	}
 	if token == nil || token.Kind != yaml.ScalarNode || token.Tag != "!!str" {
-		return nil, nil, fmt.Errorf("installed exporter config must have a string token field")
+		return nil, fmt.Errorf("installed exporter config must have a string token field")
 	}
-	return &doc, token, nil
+	return token, nil
+}
+
+var quotedToken = regexp.MustCompile(`^(?:"(?:[^"\\\r\n]|\\[^\r\n])*"|'(?:[^'\r\n]|'')*')`)
+var simpleToken = regexp.MustCompile(`^[a-zA-Z0-9_./+=-]+$`)
+
+// yaml.Node has a start position but no end position. Only accept single-line
+// scalars whose exact source range we can verify before rotating credentials.
+func exporterTokenRange(content []byte, token *yaml.Node) (int, int, error) {
+	unsupported := fmt.Errorf("installed exporter token must be an untagged, unanchored single-line scalar")
+	text := string(content)
+	// Node positions count YAML line breaks and Unicode characters, not bytes.
+	// Reject uncommon line breaks rather than risk locating a different scalar.
+	if !utf8.Valid(content) || strings.ContainsAny(strings.ReplaceAll(text, "\r\n", "\n"), "\r\u0085\u2028\u2029\ufeff") ||
+		token.Anchor != "" || token.Style & ^(yaml.SingleQuotedStyle|yaml.DoubleQuotedStyle) != 0 {
+		return 0, 0, unsupported
+	}
+	lines := strings.SplitAfter(text, "\n")
+	line := []rune(lines[token.Line-1])
+	start := len(strings.Join(lines[:token.Line-1], "")) + len(string(line[:token.Column-1]))
+	scalar := token.Value
+	if token.Style != 0 {
+		scalar = quotedToken.FindString(text[start:])
+	}
+	var decoded string
+	if scalar == "" || strings.ContainsAny(scalar, "\r\n") || !strings.HasPrefix(text[start:], scalar) ||
+		yaml.Unmarshal([]byte(scalar), &decoded) != nil || decoded != token.Value {
+		return 0, 0, unsupported
+	}
+	return start, start + len(scalar), nil
 }

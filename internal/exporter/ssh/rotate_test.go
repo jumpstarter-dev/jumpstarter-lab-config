@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -84,8 +85,8 @@ func rotationTestHost(t *testing.T, failCommand string) (*SSHHostManager, <-chan
 
 func TestRotateExporterCredentials(t *testing.T) {
 	const filename = "/etc/jumpstarter/exporters/board.yaml"
-	const config = "# keep this comment\ntoken: old-token\nendpoint: controller:443\ndriver:\n  cls: example.Driver\n"
-	for _, scenario := range []string{"rotate", "dry run", "preflight fails", "missing config", "invalid config", "rotation fails", "restart fails"} {
+	const config = "# keep this comment\r\ntoken: \"old-token\"  # credential\r\nendpoint: 'controller:443'\r\ndriver:\r\n  cls: example.Driver\r\n  token: old-token\r\n  data: {hex: 0x10, flag: true}\r\n"
+	for _, scenario := range []string{"rotate", "plain token", "single quoted token", "flow token", "special token", "dry run", "preflight fails", "missing config", "invalid config", "unsupported token", "rotation fails", "restart fails"} {
 		t.Run(scenario, func(t *testing.T) {
 			failCommand := ""
 			switch scenario {
@@ -96,8 +97,26 @@ func TestRotateExporterCredentials(t *testing.T) {
 			}
 			m, commands := rotationTestHost(t, failCommand)
 			content := config
+			success := scenario == "rotate" || scenario == "plain token" || scenario == "single quoted token" ||
+				scenario == "flow token" || scenario == "special token"
+			scalar, expectedScalar := `"old-token"`, `"new-token"`
+			switch scenario {
+			case "plain token":
+				scalar, expectedScalar = "old-token", "new-token"
+			case "single quoted token":
+				scalar, expectedScalar = "'old-token'", "'new-token'"
+			case "flow token":
+				content = "{name: café, token: \"old-token\", driver: {token: old-token}}\n"
+			case "special token":
+				content = "{token: \"old-token\", driver: {token: old-token}}\n"
+				expectedScalar = `"new: [token], # \"quoted\"\nnext\\line"`
+			}
+			content = strings.Replace(content, `"old-token"`, scalar, 1)
 			if scenario == "invalid config" {
 				content = "token: [invalid-token]\n"
+			}
+			if scenario == "unsupported token" {
+				content = "token: |-\n  old-token\n"
 			}
 			if scenario != "missing config" {
 				f, err := m.sftpClient.Create(filename)
@@ -108,6 +127,10 @@ func TestRotateExporterCredentials(t *testing.T) {
 				require.NoError(t, f.Close())
 			}
 			rotations := 0
+			newToken := "new-token"
+			if scenario == "special token" {
+				newToken = "new: [token], # \"quoted\"\nnext\\line"
+			}
 			err := m.RotateCredentials("board", scenario == "dry run", func() (string, error) {
 				rotations++
 				// The preflight command must have completed before controller mutation.
@@ -120,14 +143,14 @@ func TestRotateExporterCredentials(t *testing.T) {
 				if scenario == "rotation fails" {
 					return "", errors.New("controller unavailable")
 				}
-				return "new-token", nil
+				return newToken, nil
 			})
-			if scenario == "rotate" || scenario == "dry run" {
+			if success || scenario == "dry run" {
 				require.NoError(t, err)
 			} else {
 				require.Error(t, err)
 			}
-			if scenario == "rotate" || scenario == "rotation fails" || scenario == "restart fails" {
+			if success || scenario == "rotation fails" || scenario == "restart fails" {
 				require.Equal(t, 1, rotations)
 			} else {
 				require.Zero(t, rotations)
@@ -140,13 +163,13 @@ func TestRotateExporterCredentials(t *testing.T) {
 			got, err := io.ReadAll(f)
 			require.NoError(t, err)
 			require.NoError(t, f.Close())
-			if scenario == "rotate" || scenario == "restart fails" {
+			if success || scenario == "restart fails" {
 				var before, after map[string]any
-				require.NoError(t, yaml.Unmarshal([]byte(config), &before))
+				require.NoError(t, yaml.Unmarshal([]byte(content), &before))
 				require.NoError(t, yaml.Unmarshal(got, &after))
-				before["token"] = "new-token"
+				before["token"] = newToken
 				require.Equal(t, before, after)
-				require.Contains(t, string(got), "# keep this comment")
+				require.Equal(t, strings.Replace(content, scalar, expectedScalar, 1), string(got))
 				require.Contains(t, <-commands, "SIGHUP")
 			} else {
 				require.Equal(t, content, string(got))
@@ -158,9 +181,51 @@ func TestRotateExporterCredentials(t *testing.T) {
 	}
 }
 
+func TestExporterTokenRange(t *testing.T) {
+	for _, scalar := range []string{"old-token", `"old-token"`, `'old-token'`, `"old\\\"token"`, `'old''token'`, `""`, `''`, `"old\u002dtoken"`} {
+		for _, layout := range []string{
+			"# old-token\ntoken: %s  # keep\ndriver:\n  token: old-token\n",
+			"{name: café, token: %s, driver: {token: old-token}}\r\n",
+			"'token': %s",
+		} {
+			content := fmt.Sprintf(layout, scalar)
+			t.Run(content, func(t *testing.T) {
+				token, err := exporterToken([]byte(content))
+				require.NoError(t, err)
+				start, end, err := exporterTokenRange([]byte(content), token)
+				require.NoError(t, err)
+				require.Equal(t, scalar, content[start:end])
+				require.Equal(t, strings.Index(layout, "%s"), start)
+			})
+		}
+	}
+}
+
+func TestExporterTokenRangeRejectsUnsupportedScalars(t *testing.T) {
+	for _, content := range []string{
+		"token: |\n  secret\n", "token: >-\n  secret\n",
+		"token: secret\n  continuation\n", "token: 'secret\n  continuation'\n",
+		"token: \"secret\\\n  continuation\"\n", "token: !!str secret\n",
+		"token: &credential secret\nother: *credential\n",
+		"other: &credential secret\ntoken: *credential\n",
+		"name: host\rtoken: secret\r", "name: host\u0085token: secret\n",
+		"\ufefftoken: secret\n", "name: host\u2028token: secret\n", "name: host\u2029token: secret\n",
+		"\xff\xfet\x00o\x00k\x00e\x00n\x00:\x00 \x00s\x00e\x00c\x00r\x00e\x00t\x00\n\x00", // UTF-16LE
+	} {
+		t.Run(content, func(t *testing.T) {
+			token, err := exporterToken([]byte(content))
+			if err == nil {
+				_, _, err = exporterTokenRange([]byte(content), token)
+			}
+			require.Error(t, err)
+			require.NotContains(t, err.Error(), "secret")
+		})
+	}
+}
+
 func TestExporterTokenRejectsAmbiguousConfigs(t *testing.T) {
 	for _, content := range []string{"", "[]", "token: old\ntoken: other", "token: old\n---\ntoken: other", "token: [secret]", "driver: {}"} {
-		_, _, err := exporterToken([]byte(content))
+		_, err := exporterToken([]byte(content))
 		require.Error(t, err)
 		require.False(t, strings.Contains(err.Error(), "secret"), "errors must not echo config values")
 	}
