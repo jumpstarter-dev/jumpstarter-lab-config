@@ -47,6 +47,8 @@ func (i *Instance) RotateCredentials(ctx context.Context, kind, name string) (*c
 		return old, nil
 	}
 	// Avoid deleting a replacement created by a concurrent rotation.
+	// This also removes legacy-token-hash: old-key credentials relying on that
+	// allowance are revoked now, before the replacement can be installed.
 	if err := i.client.Delete(ctx, old, client.Preconditions{
 		UID: &old.UID, ResourceVersion: &old.ResourceVersion,
 	}); err != nil {

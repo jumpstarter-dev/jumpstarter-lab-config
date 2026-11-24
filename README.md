@@ -220,9 +220,17 @@ to their Client/Exporter resources, plus a running controller to regenerate them
 Exporter hosts need SFTP's POSIX rename extension and permission to update their
 config files and signal their services.
 
-This regenerates credentials; it does **not** revoke otherwise-valid signed JWTs.
-Old tokens may remain valid until expiry unless the controller's signing key or
-authentication policy has changed.
+Deletion immediately revokes old-key credentials that rely on the Secret's
+`jumpstarter.dev/legacy-token-hash` allowance during a signing-key migration.
+Revocation happens when the Secret is deleted, **before** the replacement is
+installed. Tokens whose signatures remain valid with the current key may
+continue to authenticate until expiry.
+
+The 90-second regeneration wait requires a running, reconciling controller. If it
+times out, the old Secret is already deleted and its legacy allowance is gone;
+restore controller reconciliation and deliver the replacement with `apply` (or
+import it for clients). Regeneration timing has not been verified against a live
+lab by this change's automated tests.
 
 ### Synchronizing access policies
 
