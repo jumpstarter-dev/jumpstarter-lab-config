@@ -212,6 +212,13 @@ to users (for example through `jmp admin import client <name> --namespace <names
 --out client.yaml`, using the appropriate cluster context). Token values are never
 printed. Resources without internal credential Secrets cannot be rotated this way.
 
+During signing-key migration, an internal-token client loses access as soon as
+its Secret is deleted and stays locked out until its user imports the replacement.
+OIDC client authentication is unaffected. **`rotate-creds all` without filters
+rotates every selected internal-token client at once from the users' perspective.**
+Coordinate replacement distribution with users first, and use `--filter-clients`
+to migrate a limited group at a time.
+
 `--dry-run` performs exporter SSH/read-access checks and verifies the controller
 credential Secret and its ownership, without changing remote files or credentials.
 It also verifies existing client credential Secrets and their ownership.
