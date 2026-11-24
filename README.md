@@ -204,6 +204,9 @@ the command continues with the others and exits nonzero if any failed. If rotati
 succeeded but installation or restart failed, retry that exporter, or use
 `apply --filter-exporters '^name$'` to deliver the current controller credential.
 No bootc or container-image updates are performed by `rotate-creds`.
+If a bootc upgrade is in progress, exporter rotation fails preflight before
+changing the controller credential, rather than installing a token whose restart
+would have to be deferred. This check also applies to forced restarts and dry runs.
 
 `clients` rotates only clients selected for synchronization on each instance.
 Client machines have no SSH destinations in the lab configuration, so replacements

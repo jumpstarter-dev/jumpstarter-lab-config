@@ -18,7 +18,7 @@ import (
 // RotateCredentials checks the installed config before invoking rotate, then
 // replaces only its token. Keep this SSH connection open throughout rotation.
 // In dry-run mode, rotate must validate the controller credential without changing it.
-func (m *SSHHostManager) RotateCredentials(service string, dryRun bool, rotate func() (string, error)) error {
+func (m *SSHHostManager) RotateCredentials(service string, dryRun, forceRestart bool, rotate func() (string, error)) error {
 	if len(validation.IsDNS1123Subdomain(service)) != 0 {
 		return fmt.Errorf("invalid exporter service name %q", service)
 	}
@@ -49,6 +49,11 @@ func (m *SSHHostManager) RotateCredentials(service string, dryRun bool, rotate f
 	}
 	if _, ok := m.sftpClient.HasExtension("posix-rename@openssh.com"); !ok {
 		return fmt.Errorf("SFTP server must support atomic POSIX rename")
+	}
+	// Check before revoking the credential: deferring a restart after rotation
+	// would leave an exporter running with a potentially revoked token.
+	if m.GetBootcStatus() == BOOTC_UPDATING {
+		return fmt.Errorf("bootc upgrade in progress; controller credential unchanged")
 	}
 	// Names are DNS-validated above, so these single-quoted paths are safe.
 	_, err = m.runCommand(fmt.Sprintf("test -w '%s' && test -w '%s' && systemctl cat -- '%s' >/dev/null",
@@ -106,11 +111,15 @@ func (m *SSHHostManager) RotateCredentials(service string, dryRun bool, rotate f
 	if err := m.sftpClient.PosixRename(staged, filename); err != nil {
 		return fmt.Errorf("install replacement exporter config: %w", err)
 	}
-	// Match apply's lease-aware restart, but propagate failures to the operator.
-	_, err = m.runCommand(fmt.Sprintf(
+	// Default to apply's lease-aware restart to cover a lease starting during rotation.
+	restart := fmt.Sprintf(
 		"if systemctl is-active --quiet '%[1]s'; then "+
 			"podman kill -s SIGHUP '%[1]s' 2>/dev/null || systemctl kill -s SIGHUP '%[1]s'; "+
-			"else systemctl restart '%[1]s'; fi", service))
+			"else systemctl restart '%[1]s'; fi", service)
+	if forceRestart {
+		restart = fmt.Sprintf("systemctl restart -- '%s'", service)
+	}
+	_, err = m.runCommand(restart)
 	if err != nil {
 		return fmt.Errorf("token installed, but exporter restart request failed: %w", err)
 	}

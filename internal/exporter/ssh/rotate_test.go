@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"strings"
 	"testing"
 
@@ -62,6 +63,9 @@ func rotationTestHost(t *testing.T, failCommand string) (*SSHHostManager, <-chan
 						commands <- payload.Command
 						_ = request.Reply(true, nil)
 						var status uint32
+						if failCommand == "bootc updating" && strings.Contains(payload.Command, "is-active bootc-") {
+							_, _ = io.WriteString(channel, "active\ninactive\n")
+						}
 						if failCommand != "" && strings.Contains(payload.Command, failCommand) {
 							status = 1
 						}
@@ -86,7 +90,7 @@ func rotationTestHost(t *testing.T, failCommand string) (*SSHHostManager, <-chan
 func TestRotateExporterCredentials(t *testing.T) {
 	const filename = "/etc/jumpstarter/exporters/board.yaml"
 	const config = "# keep this comment\r\ntoken: \"old-token\"  # credential\r\nendpoint: 'controller:443'\r\ndriver:\r\n  cls: example.Driver\r\n  token: old-token\r\n  data: {hex: 0x10, flag: true}\r\n"
-	for _, scenario := range []string{"rotate", "plain token", "single quoted token", "flow token", "special token", "dry run", "dry run rotation fails", "preflight fails", "missing config", "invalid config", "unsupported token", "rotation fails", "restart fails"} {
+	for _, scenario := range []string{"rotate", "forced restart", "bootc updating", "plain token", "single quoted token", "flow token", "special token", "dry run", "dry run rotation fails", "preflight fails", "missing config", "invalid config", "unsupported token", "rotation fails", "restart fails"} {
 		t.Run(scenario, func(t *testing.T) {
 			failCommand := ""
 			switch scenario {
@@ -94,11 +98,12 @@ func TestRotateExporterCredentials(t *testing.T) {
 				failCommand = "test -w"
 			case "restart fails":
 				failCommand = "SIGHUP"
+			case "bootc updating":
+				failCommand = scenario
 			}
 			m, commands := rotationTestHost(t, failCommand)
 			content := config
-			success := scenario == "rotate" || scenario == "plain token" || scenario == "single quoted token" ||
-				scenario == "flow token" || scenario == "special token"
+			success := slices.Contains([]string{"rotate", "forced restart", "plain token", "single quoted token", "flow token", "special token"}, scenario)
 			scalar, expectedScalar := `"old-token"`, `"new-token"`
 			switch scenario {
 			case "plain token":
@@ -131,15 +136,14 @@ func TestRotateExporterCredentials(t *testing.T) {
 			if scenario == "special token" {
 				newToken = "new: [token], # \"quoted\"\nnext\\line"
 			}
-			err := m.RotateCredentials("board", strings.HasPrefix(scenario, "dry run"), func() (string, error) {
+			err := m.RotateCredentials("board", strings.HasPrefix(scenario, "dry run"), scenario == "forced restart", func() (string, error) {
 				rotations++
 				// The preflight command must have completed before controller mutation.
-				select {
-				case command := <-commands:
-					require.Contains(t, command, "test -w")
-				default:
-					t.Fatal("rotation happened before SSH preflight")
+				preflight := false
+				for len(commands) > 0 {
+					preflight = strings.Contains(<-commands, "test -w") || preflight
 				}
+				require.True(t, preflight, "rotation happened before SSH preflight")
 				if strings.HasSuffix(scenario, "rotation fails") {
 					return "", errors.New("controller unavailable")
 				}
@@ -170,7 +174,11 @@ func TestRotateExporterCredentials(t *testing.T) {
 				before["token"] = newToken
 				require.Equal(t, before, after)
 				require.Equal(t, strings.Replace(content, scalar, expectedScalar, 1), string(got))
-				require.Contains(t, <-commands, "SIGHUP")
+				if scenario == "forced restart" {
+					require.Equal(t, "systemctl restart -- 'board'", <-commands)
+				} else {
+					require.Contains(t, <-commands, "SIGHUP")
+				}
 			} else {
 				require.Equal(t, content, string(got))
 			}

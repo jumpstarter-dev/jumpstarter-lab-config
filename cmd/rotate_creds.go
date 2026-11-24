@@ -145,7 +145,7 @@ func rotateExporter(ctx context.Context, cfg *config.Config, tapplier *templatin
 	}
 	defer func() { _ = hostSSH.Close() }()
 	rotated := false
-	err = hostSSH.RotateCredentials(rendered.Spec.ExporterMetadata.Name, dryRun, func() (string, error) {
+	err = hostSSH.RotateCredentials(rendered.Spec.ExporterMetadata.Name, dryRun, false, func() (string, error) {
 		secret, err := inst.RotateCredentials(ctx, "exporter", exporter.Name)
 		if err != nil {
 			return "", err
