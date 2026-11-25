@@ -62,7 +62,7 @@ type SSHHostManager struct {
 	writer       io.Writer
 }
 
-func NewSSHHostManager(exporterHost *v1alpha1.ExporterHost) (HostManager, error) {
+func NewSSHHostManager(exporterHost *v1alpha1.ExporterHost) (*SSHHostManager, error) {
 
 	sshHm := &SSHHostManager{
 		ExporterHost: exporterHost,

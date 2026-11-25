@@ -78,7 +78,7 @@ clean:
 	rm -f bin/jumpstarter-lab-config
 
 bin/jumpstarter-lab-config: $(shell find . -name "*.go") go.mod go.sum
-	go build -o bin/jumpstarter-lab-config cmd/*
+	go build -o bin/jumpstarter-lab-config ./cmd
 
 .PHONY: build
 build: manifests generate fmt vet bin/jumpstarter-lab-config

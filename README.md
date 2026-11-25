@@ -175,6 +175,104 @@ Applying changes:
 ```
 
 
+### Rotating credentials
+
+```shell
+jumpstarter-lab-config rotate-creds exporters --dry-run
+jumpstarter-lab-config rotate-creds all --legacy-only --dry-run
+jumpstarter-lab-config rotate-creds exporters --filter-exporters '^board-01$'
+jumpstarter-lab-config rotate-creds exporters --wait --wait-timeout 30m
+jumpstarter-lab-config rotate-creds exporters --force-leased '^board-01$' --dry-run
+jumpstarter-lab-config rotate-creds clients --filter-clients '^alice$'
+jumpstarter-lab-config rotate-creds all my-lab-config.yaml
+```
+
+`rotate-creds` processes configured resources sequentially, with the same config
+file, vault password, and name-filter conventions as `apply`. For each exporter:
+
+1. Check its current lease. Leased exporters are skipped by default; their lease,
+   owner/shared holders, and current end time are printed for coordination.
+2. Connect to its configured host over SSH/SFTP and check the installed exporter
+   YAML, write access, and systemd unit. A failed preflight leaves its controller
+   credential unchanged.
+3. Delete its credential Secret and wait up to 90 seconds for the controller to
+   regenerate it. The deletion uses UID/resource-version preconditions, and the
+   replacement must belong to the same exporter.
+4. Atomically replace only the token in `/etc/jumpstarter/exporters/<service>.yaml`,
+   preserving the other configuration values, comments, ownership and permissions.
+5. Request a lease-aware restart with SIGHUP, as `apply` does, or restart an
+   inactive service. SIGHUP covers a lease starting between the check and deletion.
+   Forced leased rotations use an immediate `systemctl restart` instead.
+
+`--legacy-only` selects only credential Secrets with a nonempty
+`jumpstarter.dev/legacy-token-hash` annotation, for exporters, clients, or `all`.
+Resources without that annotation (or without internal credentials) are reported
+as skipped. Exporters are filtered before lease waiting and SSH access, and the
+annotation is checked again before deletion using the same UID/resource-version
+preconditions. It combines with name filters, `--wait`, `--force-leased`, and
+`--dry-run`; forcing does not override this filter. The annotation is the selection
+criterion, not a check of the installed token. If an earlier rotation generated a
+new unannotated Secret but delivery failed, use filtered `apply` to deliver it.
+
+`--wait` rotates free exporters first and rechecks skipped exporters every
+`--wait-interval` (default 10s), rotating each once it becomes free. The
+`--wait-timeout` (default 30m) bounds the operation per instance, including rotations;
+timeout exits nonzero and names the pending exporters. In-flight SSH operations
+finish before the timeout is reported. Lease end times are read
+again on every pass, including extensions; they are informational, not a schedule
+for deciding when an exporter is free.
+
+`--force-leased <regexp>` explicitly selects leased exporters for immediate
+rotation/restart, interrupting their sessions. It is intersected with
+`--filter-exporters`; nonmatching leased exporters remain skipped (or waited for
+with `--wait`). Holders are printed before each forced rotation. Run `--dry-run`
+first to see the same holder/end-time table and notify users. Dry runs never wait
+or restart anything, even with `--wait` or `--force-leased`.
+
+The service name comes from the exporter's rendered config template. Dead,
+unmanaged, and hostless exporters are skipped. Failures are reported per resource;
+the command continues with the others and exits nonzero if any failed. If rotation
+succeeded but installation or restart failed, retry that exporter, or use
+`apply --filter-exporters '^name$'` to deliver the current controller credential.
+No bootc or container-image updates are performed by `rotate-creds`.
+If a bootc upgrade is in progress, exporter rotation fails preflight before
+changing the controller credential, rather than installing a token whose restart
+would have to be deferred. This check also applies to forced restarts and dry runs.
+
+`clients` rotates only clients selected for synchronization on each instance.
+Client machines have no SSH destinations in the lab configuration, so replacements
+remain in the controller Secrets; the command prints their names for distribution
+to users (for example through `jmp admin import client <name> --namespace <namespace>
+--out client.yaml`, using the appropriate cluster context). Token values are never
+printed. Resources without internal credential Secrets cannot be rotated this way.
+
+During signing-key migration, an internal-token client loses access as soon as
+its Secret is deleted and stays locked out until its user imports the replacement.
+OIDC client authentication is unaffected. **`rotate-creds all` without filters
+rotates every selected internal-token client at once from the users' perspective.**
+Coordinate replacement distribution with users first, and use `--filter-clients`
+to migrate a limited group at a time.
+
+`--dry-run` performs exporter SSH/read-access checks and verifies the controller
+credential Secret and its ownership, without changing remote files or credentials.
+It also verifies existing client credential Secrets and their ownership.
+Rotation requires Kubernetes get/delete access to credential Secrets and get access
+to their Client/Exporter resources, plus a running controller to regenerate them.
+Exporter hosts need SFTP's POSIX rename extension and permission to update their
+config files and signal their services.
+
+Deletion immediately revokes old-key credentials that rely on the Secret's
+`jumpstarter.dev/legacy-token-hash` allowance during a signing-key migration.
+Revocation happens when the Secret is deleted, **before** the replacement is
+installed. Tokens whose signatures remain valid with the current key may
+continue to authenticate until expiry.
+
+The 90-second regeneration wait requires a running, reconciling controller. If it
+times out, the old Secret is already deleted and its legacy allowance is gone;
+restore controller reconciliation and deliver the replacement with `apply` (or
+import it for clients). Regeneration timing has not been verified against a live
+lab by this change's automated tests.
+
 ### Synchronizing access policies
 
 Include `ExporterAccessPolicy` manifests through `sources.policies`:
