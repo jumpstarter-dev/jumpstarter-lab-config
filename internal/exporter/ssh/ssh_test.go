@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -386,4 +387,118 @@ func TestSanitizeDiff(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+// newTestManager returns an SSHHostManager with fake runCommand/reconcileFile
+// implementations, so Apply() can be tested without a real SSH host.
+func newTestManager(t *testing.T, bootcUpdating bool, changed map[string]bool) (*SSHHostManager, *[]string, map[string]bool) {
+	t.Helper()
+	var commands []string
+	reconciled := map[string]bool{}
+	m := &SSHHostManager{
+		ExporterHost: createTestExporterHost("test-host"),
+		writer:       io.Discard,
+		runCommandFn: func(cmd string) (*CommandResult, error) {
+			commands = append(commands, cmd)
+			switch {
+			case strings.Contains(cmd, "is-active") && strings.Contains(cmd, "bootc-fetch-apply-updates"):
+				// Real hosts keep the timer active (armed, waiting for the next
+				// elapse); the service is only active during an actual upgrade.
+				// is-active answers one line per unit, in argument order.
+				serviceState := "inactive"
+				if bootcUpdating {
+					serviceState = "active"
+				}
+				var states []string
+				if strings.Contains(cmd, "bootc-fetch-apply-updates.service") {
+					states = append(states, serviceState)
+				}
+				if strings.Contains(cmd, "bootc-fetch-apply-updates.timer") {
+					states = append(states, "active")
+				}
+				return &CommandResult{Stdout: strings.Join(states, "\n") + "\n", ExitCode: 0}, nil
+			case strings.Contains(cmd, "is-active"):
+				return &CommandResult{Stdout: "active\n", ExitCode: 0}, nil // exporter service is running
+			default:
+				return &CommandResult{ExitCode: 0}, nil
+			}
+		},
+		reconcileFileFn: func(path, content string, dryRun bool) (bool, error) {
+			reconciled[path] = true
+			return changed[path], nil
+		},
+	}
+	return m, &commands, reconciled
+}
+
+func testExporterConfig() *v1alpha1.ExporterConfigTemplate {
+	return &v1alpha1.ExporterConfigTemplate{
+		Spec: v1alpha1.ExporterConfigTemplateSpec{
+			ContainerImage:           "quay.io/example/jumpstarter:latest",
+			ExporterMetadata:         v1alpha1.ExporterMeta{Name: "test-host"},
+			SystemdContainerTemplate: "container-unit",
+			ConfigTemplate:           "config-yaml",
+		},
+	}
+}
+
+func TestApplyConfigOnlyChangeSkipsDaemonReload(t *testing.T) {
+	changed := map[string]bool{
+		"/etc/jumpstarter/exporters/test-host.yaml": true,
+	}
+	m, commands, _ := newTestManager(t, false, changed)
+
+	err := m.Apply(testExporterConfig(), false)
+
+	assert.NoError(t, err)
+	assert.NotContains(t, *commands, "systemctl daemon-reload")
+	assert.Equal(t, `command -v podman >/dev/null 2>&1 && podman kill -s SIGHUP "test-host" || systemctl kill -s SIGHUP "test-host"`, (*commands)[len(*commands)-1])
+}
+
+func TestApplyUnitChangeTriggersDaemonReload(t *testing.T) {
+	changed := map[string]bool{
+		"/etc/containers/systemd/test-host.container": true,
+	}
+	m, commands, _ := newTestManager(t, false, changed)
+
+	err := m.Apply(testExporterConfig(), false)
+
+	assert.NoError(t, err)
+	assert.Contains(t, *commands, "systemctl daemon-reload")
+}
+
+func TestApplyDefersUnitFilesDuringBootcUpgrade(t *testing.T) {
+	changed := map[string]bool{
+		"/etc/containers/systemd/test-host.container": true,
+		"/etc/jumpstarter/exporters/test-host.yaml":   true,
+	}
+	m, commands, reconciled := newTestManager(t, true, changed)
+
+	err := m.Apply(testExporterConfig(), false)
+
+	assert.NoError(t, err)
+	assert.False(t, reconciled["/etc/containers/systemd/test-host.container"], "container unit file must not be written during a bootc upgrade")
+	assert.False(t, reconciled["/etc/systemd/system/test-host.service"], "service unit file must not be written during a bootc upgrade")
+	assert.True(t, reconciled["/etc/jumpstarter/exporters/test-host.yaml"], "config file needs no reload, so it may be written")
+	joined := strings.Join(*commands, "\n")
+	assert.NotContains(t, joined, "daemon-reload")
+	assert.NotContains(t, joined, "SIGHUP")
+	assert.NotContains(t, joined, "systemctl start")
+}
+
+// TestApplyWritesUnitFilesWhenBootcTimerArmedButIdle covers the regression
+// where an armed (active) update timer was mistaken for a running upgrade,
+// deferring unit file writes on every single run.
+func TestApplyWritesUnitFilesWhenBootcTimerArmedButIdle(t *testing.T) {
+	changed := map[string]bool{
+		"/etc/containers/systemd/test-host.container": true,
+	}
+	// bootcUpdating=false: timer armed, no upgrade service running.
+	m, commands, reconciled := newTestManager(t, false, changed)
+
+	err := m.Apply(testExporterConfig(), false)
+
+	assert.NoError(t, err)
+	assert.True(t, reconciled["/etc/containers/systemd/test-host.container"], "unit file must be written when no upgrade is running")
+	assert.Contains(t, *commands, "systemctl daemon-reload")
 }
