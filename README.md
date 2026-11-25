@@ -381,6 +381,53 @@ Applying changes:
 ⚠️ Exporter host 'ti-jacinto-j78s4xevm-44-sidekick' will update as soon as existing leases end.
 ```
 
+### Managing exporter hosts through Flight Control
+
+An exporter host can be managed through [Flight Control](https://github.com/flightctl/flightctl)
+instead of SSH. Select its device by label in the `ExporterHost`:
+
+```yaml
+apiVersion: meta.jumpstarter.dev/v1alpha1
+kind: ExporterHost
+metadata:
+  name: ti-jacinto-j784s4xevm-01-sidekick-01
+spec:
+  management:
+    flightctl:
+      deviceSelector:
+        host: "$( name )"
+```
+
+The selector must match exactly one device. Flight Control names devices after their key
+fingerprint, so approve the enrollment with a label, for example
+`flightctl approve -l host=ti-jacinto-j784s4xevm-01-sidekick-01 er/<name>`. A host managed through
+Flight Control has no `management.ssh`: lint rejects a host that sets both.
+
+When a run processes such a host, `apply` talks to the Flight Control API with the client config
+written by `flightctl login`
+(`--flightctl-config` selects another file). It puts the quadlet or systemd unit and the exporter
+config of every exporter on the host into one inline config provider named
+`jumpstarter-exporters` in the device spec. Other config providers, the OS image and the
+applications of the device are left alone, and so are files of exporters that this run does not
+process. `--dry-run` shows the files that would change.
+
+What differs from SSH:
+
+* `jumpstarter-lab-config` does not restart anything. The Flight Control agent writes the files,
+  and the host image must carry an `afterUpdating` hook that reloads systemd and starts the
+  exporter or sends it `SIGHUP`, so that a leased exporter restarts once the lease ends.
+* The device must not be owned by a fleet: Flight Control rejects spec changes for such a device.
+* `apply` reads the device and patches it only if it has not changed since. When something else
+  changed the device in between, the patch fails and `apply` has to run again.
+* No other config provider of the device may deliver the same files: Flight Control rejects a
+  spec in which two providers write the same path.
+* The exporter container image is not compared with the registry. Pin a tag or digest in the
+  template to roll out a new image.
+* The OS image is not managed yet.
+* The Flight Control agent keeps writing the exporter config as it is in the device spec. An
+  exporter that renews its token writes the new one to the same file and the agent overwrites it
+  again, so run `apply` regularly to bring the current token back into the spec.
+
 ## Design details
 
 * We want this tool to be modular, will start by interfacing with the exporter-hosts via simple ssh

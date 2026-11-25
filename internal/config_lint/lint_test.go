@@ -286,6 +286,43 @@ func TestValidateReferences_SkipsUnmanagedExporters(t *testing.T) {
 	assert.Empty(t, errorsByFile)
 }
 
+func TestValidateExporterHostManagement(t *testing.T) {
+	selector := map[string]string{"host": "sidekick"}
+	cfg := &config.Config{
+		Loaded: &config.LoadedLabConfig{
+			ExporterHosts: map[string]*v1alphaConfig.ExporterHost{
+				"no-selector": {Spec: v1alphaConfig.ExporterHostSpec{
+					Management: v1alphaConfig.Management{FlightCtl: &v1alphaConfig.FlightCtlDevice{}},
+				}},
+				"also-ssh": {Spec: v1alphaConfig.ExporterHostSpec{
+					Management: v1alphaConfig.Management{
+						SSH:       v1alphaConfig.SSHCredentials{Host: "also-ssh"},
+						FlightCtl: &v1alphaConfig.FlightCtlDevice{DeviceSelector: selector},
+					},
+				}},
+				"flightctl": {Spec: v1alphaConfig.ExporterHostSpec{
+					Management: v1alphaConfig.Management{FlightCtl: &v1alphaConfig.FlightCtlDevice{DeviceSelector: selector}},
+				}},
+				"ssh": {Spec: v1alphaConfig.ExporterHostSpec{
+					Management: v1alphaConfig.Management{SSH: v1alphaConfig.SSHCredentials{Host: "ssh"}},
+				}},
+			},
+			SourceFiles: map[string]map[string]string{
+				"ExporterHost": {
+					"no-selector": "no-selector.yaml", "also-ssh": "also-ssh.yaml",
+					"flightctl": "flightctl.yaml", "ssh": "ssh.yaml",
+				},
+			},
+		},
+	}
+
+	errorsByFile := validateExporterHostManagement(cfg)
+
+	assert.Len(t, errorsByFile, 2)
+	assert.ErrorContains(t, errorsByFile["no-selector.yaml"][0], "deviceSelector needs at least one label")
+	assert.ErrorContains(t, errorsByFile["also-ssh.yaml"][0], "management.ssh and management.flightctl are mutually exclusive")
+}
+
 func TestValidateEnabledConsistency(t *testing.T) {
 	tests := []struct {
 		name           string

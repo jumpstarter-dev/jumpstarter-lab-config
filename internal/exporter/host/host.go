@@ -18,9 +18,11 @@ package host
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -62,6 +64,8 @@ type ExporterHostSyncer struct {
 	exporterFilter       *regexp.Regexp
 	retryConfig          RetryConfig
 	parallelism          int
+	// flightctlConfigPath is the flightctl client config to use; empty means where the flightctl CLI keeps it.
+	flightctlConfigPath string
 }
 
 func NewExporterHostSyncer(cfg *config.Config,
@@ -69,7 +73,8 @@ func NewExporterHostSyncer(cfg *config.Config,
 	serviceParametersMap map[string]template.ServiceParameters,
 	dryRun, debugConfigs bool,
 	exporterFilter *regexp.Regexp,
-	parallelism int) *ExporterHostSyncer {
+	parallelism int,
+	flightctlConfigPath string) *ExporterHostSyncer {
 	return &ExporterHostSyncer{
 		cfg:                  cfg,
 		tapplier:             tapplier,
@@ -78,6 +83,7 @@ func NewExporterHostSyncer(cfg *config.Config,
 		debugConfigs:         debugConfigs,
 		exporterFilter:       exporterFilter,
 		parallelism:          parallelism,
+		flightctlConfigPath:  flightctlConfigPath,
 		// this provides 10 minutes of retries with a max delay of 120 seconds
 		retryConfig: RetryConfig{
 			MaxAttempts:       9,
@@ -170,6 +176,15 @@ func (e *ExporterHostSyncer) filterExporterInstances(hostName string, exporterIn
 
 // processExporterInstance processes a single exporter instance
 func (e *ExporterHostSyncer) processExporterInstance(exporterInstance *api.ExporterInstance, hostSsh ssh.HostManager, out *OutputBuffer) error {
+	tcfg, err := e.renderExporterInstance(exporterInstance, out)
+	if err != nil {
+		return err
+	}
+	return hostSsh.Apply(tcfg, e.dryRun)
+}
+
+// renderExporterInstance renders the templates of a single exporter instance
+func (e *ExporterHostSyncer) renderExporterInstance(exporterInstance *api.ExporterInstance, out *OutputBuffer) (*api.ExporterConfigTemplate, error) {
 	// filterExporterInstances only passes active (non-dead, managed) instances here.
 
 	out.Printf("    📟 Exporter instance: %s\n", exporterInstance.Name)
@@ -177,24 +192,24 @@ func (e *ExporterHostSyncer) processExporterInstance(exporterInstance *api.Expor
 
 	et, err := template.NewExporterInstanceTemplater(e.cfg, exporterInstance)
 	if err != nil {
-		return fmt.Errorf("error creating ExporterInstanceTemplater for %s : %w", errName, err)
+		return nil, fmt.Errorf("error creating ExporterInstanceTemplater for %s : %w", errName, err)
 	}
 
 	spRef := exporterInstance.Spec.JumpstarterInstanceRef.Name + ":" + exporterInstance.Name
 	serviceParameters, ok := e.serviceParametersMap[spRef]
 	if !ok {
-		return fmt.Errorf("service parameters not found for %s", spRef)
+		return nil, fmt.Errorf("service parameters not found for %s", spRef)
 	}
 	et.SetServiceParameters(serviceParameters)
 
 	_, err = et.RenderTemplateLabels()
 	if err != nil {
-		return fmt.Errorf("error creating ExporterInstanceTemplater for %s : %w", errName, err)
+		return nil, fmt.Errorf("error creating ExporterInstanceTemplater for %s : %w", errName, err)
 	}
 
 	tcfg, err := et.RenderTemplateConfig()
 	if err != nil {
-		return fmt.Errorf("error rendering template config for %s : %w", errName, err)
+		return nil, fmt.Errorf("error rendering template config for %s : %w", errName, err)
 	}
 
 	if e.debugConfigs {
@@ -211,7 +226,7 @@ func (e *ExporterHostSyncer) processExporterInstance(exporterInstance *api.Expor
 		out.Printf("%s\n", strings.Repeat("─", 60))
 	}
 
-	return hostSsh.Apply(tcfg, e.dryRun)
+	return tcfg, nil
 }
 
 // calculateBackoffDelay calculates the delay for exponential backoff
@@ -320,6 +335,15 @@ type hostWork struct {
 	totalInstances   int
 	skippedInstances []string
 	skippedOutput    string
+}
+
+// newOutput starts the output of a host under label, with the messages about its skipped instances.
+func (w hostWork) newOutput(label string) *OutputBuffer {
+	out := NewOutputBuffer(label, w.totalInstances)
+	out.SetSkippedInstances(w.skippedInstances)
+	out.Printf("\n💻  Exporter host: %s\n", label)
+	out.Printf("%s", w.skippedOutput)
+	return out
 }
 
 // processGlobalRetryQueue processes the global retry queue with exponential backoff
@@ -497,14 +521,14 @@ func (e *ExporterHostSyncer) processRetryGroup(items []RetryItem, out *OutputBuf
 	return localRetries, succeeded
 }
 
-// SyncExporterHosts synchronizes exporter hosts via SSH, processing hosts in parallel.
+// SyncExporterHosts synchronizes exporter hosts via SSH or flightctl, processing hosts in parallel.
 func (e *ExporterHostSyncer) SyncExporterHosts() error {
-	fmt.Print("\n🔄 Syncing exporter hosts via SSH ===========================\n")
+	fmt.Print("\n🔄 Syncing exporter hosts ===========================\n")
 
 	printer := NewSyncPrinter()
 
 	// Pre-filter and template all hosts (fast, no SSH involved)
-	work := make([]hostWork, 0, len(e.cfg.Loaded.ExporterHosts))
+	var sshWork, flightctlWork []hostWork
 	for _, host := range e.cfg.Loaded.ExporterHosts {
 		exporterInstances := e.cfg.Loaded.GetExporterInstancesByExporterHost(host.Name)
 
@@ -526,54 +550,76 @@ func (e *ExporterHostSyncer) SyncExporterHosts() error {
 		if err := e.tapplier.Apply(hostCopy); err != nil {
 			return fmt.Errorf("error applying template for %s: %w", host.Name, err)
 		}
-		// if there are no addresses, skip the host
-		if len(hostCopy.Spec.Addresses) == 0 {
-			fmt.Printf("    ❌ Skipping %s - no addresses\n", host.Name)
-			continue
-		}
 
-		work = append(work, hostWork{
+		w := hostWork{
 			host:             hostCopy,
 			hostName:         host.Name,
 			instances:        filteredInstances,
 			totalInstances:   filterOut.instanceCount,
 			skippedInstances: filterOut.skippedInstances,
 			skippedOutput:    filterOut.buf.String(),
-		})
+		}
+		// Lint rejects a host with both management.ssh and management.flightctl
+		switch {
+		case hostCopy.Spec.Management.FlightCtl != nil:
+			flightctlWork = append(flightctlWork, w)
+		case len(hostCopy.Spec.Addresses) == 0:
+			fmt.Printf("    ❌ Skipping %s - no addresses\n", host.Name)
+		default:
+			sshWork = append(sshWork, w)
+		}
 	}
 
+	// Only a run that reaches a flightctl host reads the flightctl login. A login that cannot be read
+	// fails the flightctl hosts like any other flightctl error, and the SSH hosts still sync.
+	flightctlClient := sync.OnceValues(e.newFlightctlClient)
+
 	// Process hosts in parallel
-	var retryMu sync.Mutex
+	var resultsMu sync.Mutex
 	retryQueue := make([]RetryItem, 0)
+	var flightctlErrs []error
 
 	g, _ := errgroup.WithContext(context.Background())
 	if e.parallelism > 0 {
 		g.SetLimit(e.parallelism)
 	}
 
-	for _, w := range work {
+	for _, w := range sshWork {
 		g.Go(func() error {
-			out := NewOutputBuffer(w.host.Spec.Addresses[0], w.totalInstances)
-			out.SetSkippedInstances(w.skippedInstances)
-			out.Printf("\n💻  Exporter host: %s\n", w.host.Spec.Addresses[0])
-			if w.skippedOutput != "" {
-				out.Printf("%s", w.skippedOutput)
-			}
-
+			out := w.newOutput(w.host.Spec.Addresses[0])
 			e.processExporterInstancesAndBootc(w.instances, w.hostName, w.host, out)
 			out.Done()
 
 			// Collect retry items under lock
-			retryMu.Lock()
+			resultsMu.Lock()
 			retryQueue = append(retryQueue, out.retryItems...)
-			retryMu.Unlock()
+			resultsMu.Unlock()
 
 			// Atomically flush output for this host
 			printer.FlushBuffer(out)
 			return nil
 		})
 	}
+	// A flightctl update is one API call per host, so it is not retried: a failure is final for this run
+	for _, w := range flightctlWork {
+		g.Go(func() error {
+			out := w.newOutput(w.hostName + " (flightctl)")
+			if err := e.syncFlightctlHost(flightctlClient, w, out); err != nil {
+				out.Printf("    ❌ Failed to sync via flightctl: %v\n", err)
+				out.MarkError()
+				resultsMu.Lock()
+				flightctlErrs = append(flightctlErrs, fmt.Errorf("flightctl host %s: %w", w.hostName, err))
+				resultsMu.Unlock()
+			}
+			out.Done()
+			printer.FlushBuffer(out)
+			return nil
+		})
+	}
 	_ = g.Wait()
+
+	slices.SortFunc(flightctlErrs, func(a, b error) int { return strings.Compare(a.Error(), b.Error()) })
+	flightctlErr := errors.Join(flightctlErrs...)
 
 	// Second pass: retry all failed instances globally
 	if len(retryQueue) > 0 {
@@ -582,12 +628,12 @@ func (e *ExporterHostSyncer) SyncExporterHosts() error {
 		retrySucceeded, err := e.processGlobalRetryQueue(retryQueue, printer)
 		printer.AddRetryStats(retryTotal, retrySucceeded)
 		if err != nil {
-			return fmt.Errorf("error syncing exporter hosts: %w", err)
+			return errors.Join(fmt.Errorf("error syncing exporter hosts: %w", err), flightctlErr)
 		}
 	}
 
 	// Print final summary
 	printer.PrintSummary()
 
-	return nil
+	return flightctlErr
 }

@@ -387,3 +387,21 @@ func TestSanitizeDiff(t *testing.T) {
 		})
 	}
 }
+
+func TestContentDiffRedactsLongTokens(t *testing.T) {
+	// cmp.Diff splits single-line contents like these into pieces after their common prefix
+	const (
+		oldToken = "eyJhbGciOiJSUzI1NiIsImtpZCI6Im9sZC1rZXkifQ.eyJzdWIiOiJib2FyZC0wMSIsImV4cCI6MTcwMDAwMDAwMH0." +
+			"OLDSIGNATUREaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		newToken = "eyJhbGciOiJSUzI1NiIsImtpZCI6Im9sZC1rZXkifQ.eyJzdWIiOiJib2FyZC0wMSIsImV4cCI6MTgwMDAwMDAwMH0." +
+			"NEWSIGNATUREbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	)
+
+	assert.Empty(t, ContentDiff("token: "+oldToken, "token: "+newToken))
+
+	diff := ContentDiff("endpoint: old\ntoken: "+oldToken, "endpoint: new\ntoken: "+newToken)
+	assert.Contains(t, diff, "endpoint: new")
+	for _, secret := range []string{"SIGNATURE", "MTcwMDAwMDAwMH0", "MTgwMDAwMDAwMH0"} {
+		assert.NotContains(t, diff, secret)
+	}
+}
